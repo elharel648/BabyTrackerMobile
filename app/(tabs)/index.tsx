@@ -2,52 +2,61 @@ import React from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-const quickActions = [
-  { label: 'Log Feed', icon: 'restaurant' as const },
-  { label: 'Log Sleep', icon: 'moon' as const },
-  { label: 'Log Diaper', icon: 'water' as const },
+type QuickAction = {
+  label: string;
+  icon: keyof typeof Ionicons.glyphMap;
+};
+
+type SummaryStat = {
+  label: string;
+  value: string;
+};
+
+const quickActions: QuickAction[] = [
+  { label: 'Log feed', icon: 'restaurant' },
+  { label: 'Log sleep', icon: 'moon' },
+  { label: 'Log diaper', icon: 'water' },
+];
+
+const todayStats: SummaryStat[] = [
+  { label: 'Total sleep', value: '11h 20m' },
+  { label: 'Feeds', value: '6' },
+  { label: 'Diapers', value: '5' },
 ];
 
 export default function HomeScreen() {
   const handleAction = (label: string) => {
-    if (Alert.alert) {
-      Alert.alert(label, 'Action coming soon');
-    } else {
-      console.log(`Action selected: ${label}`);
-    }
+    Alert.alert(label, 'Action coming soon');
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
-      <View style={styles.header}>
-        <Text style={styles.greeting}>Hi, Alma&apos;s dad 👋</Text>
-        <Text style={styles.subtext}>Here&apos;s today&apos;s snapshot</Text>
+    <ScrollView
+      style={styles.screen}
+      contentContainerStyle={styles.container}
+      showsVerticalScrollIndicator={false}
+    >
+      <View style={styles.headerRow}>
+        <View style={styles.headerTextGroup}>
+          <Text style={styles.greeting}>Hi, Alma&apos;s dad 👋</Text>
+          <Text style={styles.subtitle}>Here&apos;s how today is going</Text>
+        </View>
+        <View style={styles.badge}>
+          <View style={styles.badgeIconCircle}>
+            <Ionicons name="heart" size={18} color="#f472b6" />
+          </View>
+          <Text style={styles.badgeText}>Alma</Text>
+        </View>
       </View>
 
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Today</Text>
         <View style={styles.summaryRow}>
-          <View style={styles.summaryItem}>
-            <View style={[styles.iconCircle, styles.sleepCircle]}>
-              <Ionicons name="moon" size={20} color="#fff" />
+          {todayStats.map((stat) => (
+            <View key={stat.label} style={styles.summaryItem}>
+              <Text style={styles.summaryLabel}>{stat.label}</Text>
+              <Text style={styles.summaryValue}>{stat.value}</Text>
             </View>
-            <Text style={styles.summaryLabel}>Sleep</Text>
-            <Text style={styles.summaryValue}>7h 45m</Text>
-          </View>
-          <View style={styles.summaryItem}>
-            <View style={[styles.iconCircle, styles.feedCircle]}>
-              <Ionicons name="restaurant" size={20} color="#fff" />
-            </View>
-            <Text style={styles.summaryLabel}>Feeds</Text>
-            <Text style={styles.summaryValue}>5</Text>
-          </View>
-          <View style={styles.summaryItem}>
-            <View style={[styles.iconCircle, styles.diaperCircle]}>
-              <Ionicons name="water" size={20} color="#fff" />
-            </View>
-            <Text style={styles.summaryLabel}>Diapers</Text>
-            <Text style={styles.summaryValue}>6</Text>
-          </View>
+          ))}
         </View>
       </View>
 
@@ -58,53 +67,105 @@ export default function HomeScreen() {
             <Pressable
               key={action.label}
               onPress={() => handleAction(action.label)}
-              style={({ pressed }) => [styles.actionButton, pressed && styles.actionButtonPressed]}
+              style={({ pressed }) => [
+                styles.actionButton,
+                pressed && styles.actionButtonPressed,
+              ]}
             >
-              <View style={styles.actionIconWrapper}>
-                <Ionicons name={action.icon} size={22} color="#4B5563" />
+              <View style={styles.actionIconCircle}>
+                <Ionicons name={action.icon} size={24} color="#f9fafb" />
               </View>
               <Text style={styles.actionLabel}>{action.label}</Text>
             </Pressable>
           ))}
         </View>
       </View>
+
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Today timeline</Text>
+        <Text style={styles.timelineText}>
+          Soon you&apos;ll see a timeline of Alma&apos;s sleep, feeds and diaper changes here.
+        </Text>
+      </View>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
+  screen: {
+    backgroundColor: '#020617',
+  },
   container: {
     padding: 24,
     gap: 16,
-    backgroundColor: '#F7F8FB',
   },
-  header: {
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 16,
+  },
+  headerTextGroup: {
+    flex: 1,
     gap: 6,
   },
   greeting: {
     fontSize: 28,
     fontWeight: '700',
-    color: '#0F172A',
+    color: '#e5e7eb',
   },
-  subtext: {
+  subtitle: {
     fontSize: 16,
-    color: '#6B7280',
+    color: '#9ca3af',
   },
-  card: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 20,
-    shadowColor: '#0F172A',
-    shadowOpacity: 0.06,
+  badge: {
+    backgroundColor: '#0f172a',
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#1f2937',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 6 },
-    elevation: 2,
+    elevation: 4,
+  },
+  badgeIconCircle: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#111827',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#1f2937',
+  },
+  badgeText: {
+    color: '#f9fafb',
+    fontWeight: '700',
+    fontSize: 16,
+  },
+  card: {
+    backgroundColor: '#020617',
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#1f2937',
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 6,
     gap: 16,
   },
   cardTitle: {
+    color: '#f9fafb',
     fontSize: 18,
     fontWeight: '700',
-    color: '#0F172A',
   },
   summaryRow: {
     flexDirection: 'row',
@@ -113,36 +174,21 @@ const styles = StyleSheet.create({
   },
   summaryItem: {
     flex: 1,
-    backgroundColor: '#F1F5F9',
-    borderRadius: 14,
-    padding: 14,
-    alignItems: 'center',
-    gap: 8,
+    backgroundColor: '#0b1120',
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#1f2937',
+    gap: 6,
   },
   summaryLabel: {
-    fontSize: 14,
-    color: '#4B5563',
+    color: '#9ca3af',
+    fontSize: 13,
   },
   summaryValue: {
+    color: '#f9fafb',
     fontSize: 20,
     fontWeight: '700',
-    color: '#0F172A',
-  },
-  iconCircle: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  sleepCircle: {
-    backgroundColor: '#6366F1',
-  },
-  feedCircle: {
-    backgroundColor: '#F59E0B',
-  },
-  diaperCircle: {
-    backgroundColor: '#10B981',
   },
   actionsRow: {
     flexDirection: 'row',
@@ -150,30 +196,43 @@ const styles = StyleSheet.create({
   },
   actionButton: {
     flex: 1,
-    backgroundColor: '#F8FAFC',
+    backgroundColor: '#0b1120',
     borderRadius: 14,
-    paddingVertical: 16,
-    paddingHorizontal: 12,
+    paddingVertical: 18,
     alignItems: 'center',
-    gap: 8,
+    gap: 12,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: '#1f2937',
+    shadowColor: '#000',
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 4,
+    transform: [{ scale: 1 }],
   },
   actionButtonPressed: {
-    backgroundColor: '#EEF2FF',
-    borderColor: '#C7D2FE',
+    opacity: 0.85,
+    transform: [{ scale: 0.97 }],
   },
-  actionIconWrapper: {
-    width: 42,
-    height: 42,
-    borderRadius: 12,
-    backgroundColor: '#E5E7EB',
+  actionIconCircle: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: '#111827',
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#1f2937',
   },
   actionLabel: {
+    color: '#e5e7eb',
     fontSize: 14,
     fontWeight: '600',
-    color: '#1F2937',
+    textTransform: 'capitalize',
+  },
+  timelineText: {
+    color: '#9ca3af',
+    fontSize: 14,
+    lineHeight: 20,
   },
 });
