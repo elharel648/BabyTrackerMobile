@@ -1,6 +1,11 @@
-// src/context/EventsProvider.tsx
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import React, { createContext, ReactNode, useContext, useEffect, useState } from 'react';
+import React, {
+  createContext,
+  ReactNode,
+  useCallback,
+  useContext,
+  useMemo,
+  useState,
+} from 'react';
 
 export type TimelineEntryType = 'feed' | 'sleep' | 'diaper';
 
@@ -8,81 +13,66 @@ export type TimelineEntry = {
   id: string;
   type: TimelineEntryType;
   label: string;
-  time: string;      // תצוגה – שעה בפורמט אנושי
-  timestamp: number; // מילישניות מאז epoch – לשימוש פנימי
+  time: string; // HH:MM כמו שמוצג במסך
+  timestamp: number; // Date.now()
 };
 
 type EventsContextValue = {
+  events: TimelineEntry[];
   timeline: TimelineEntry[];
   addEntry: (entry: TimelineEntry) => void;
-  clearToday: () => void;
+  clearAll: () => void;
 };
 
 const EventsContext = createContext<EventsContextValue | undefined>(undefined);
 
-const STORAGE_KEY = 'babyTracker:timeline';
+export const EventsProvider: React.FC<{ children: ReactNode }> = ({
+  children,
+}) => {
+  // תמיד מתחילים ממערך ריק – לא undefined
+  const [events, setEvents] = useState<TimelineEntry[]>([]);
 
-type Props = {
-  children: ReactNode;
-};
-
-export const EventsProvider: React.FC<Props> = ({ children }) => {
-  const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
-
-  // טעינה מ-AsyncStorage
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const raw = await AsyncStorage.getItem(STORAGE_KEY);
-        if (!raw) return;
-
-        const parsed: TimelineEntry[] = JSON.parse(raw);
-
-        // פה אפשר בעתיד לסנן לפי תאריך (היום) אם תרצה
-        setTimeline(parsed);
-      } catch (e) {
-        console.warn('Failed to load timeline', e);
-      }
-    };
-
-    load();
+  const addEntry = useCallback((entry: TimelineEntry) => {
+    setEvents(prev => [...prev, entry]);
   }, []);
 
-  // שמירה ב-AsyncStorage כשמשתנה
-  useEffect(() => {
-    const save = async () => {
-      try {
-        await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(timeline));
-      } catch (e) {
-        console.warn('Failed to save timeline', e);
-      }
-    };
+  const clearAll = useCallback(() => {
+    setEvents([]);
+  }, []);
 
-    save();
-  }, [timeline]);
+  // אם תרצה – אפשר לסנן פה רק אירועים של היום,
+  // כרגע פשוט מחזירים את הכל.
+  const timeline = useMemo(() => {
+    return events;
+  }, [events]);
 
-  const addEntry = (entry: TimelineEntry) => {
-    setTimeline(prev => [entry, ...prev].slice(0, 200));
-  };
+  const value: EventsContextValue = useMemo(
+    () => ({
+      events,
+      timeline,
+      addEntry,
+      clearAll,
+    }),
+    [events, timeline, addEntry, clearAll],
+  );
 
-  const clearToday = () => {
-    // כרגע מוחקים הכל – בהמשך אפשר למחוק רק את היום
-    setTimeline([]);
-  };
-
-  const value: EventsContextValue = {
-    timeline,
-    addEntry,
-    clearToday,
-  };
-
-  return <EventsContext.Provider value={value}>{children}</EventsContext.Provider>;
+  return (
+    <EventsContext.Provider value={value}>{children}</EventsContext.Provider>
+  );
 };
 
-export const useEvents = (): EventsContextValue => {
+export const useEvents = () => {
   const ctx = useContext(EventsContext);
   if (!ctx) {
-    throw new Error('useEvents must be used within EventsProvider');
+    // במקום לזרוק שגיאה שתפיל את האפליקציה,
+    // מחזירים אובייקט "ריק" כדי שלא יהיו קריסות.
+    console.warn('useEvents used without EventsProvider – returning empty value');
+    return {
+      events: [] as TimelineEntry[],
+      timeline: [] as TimelineEntry[],
+      addEntry: (_entry: TimelineEntry) => {},
+      clearAll: () => {},
+    } satisfies EventsContextValue;
   }
   return ctx;
 };

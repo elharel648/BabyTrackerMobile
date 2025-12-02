@@ -42,7 +42,21 @@ const BABY_DOB = new Date('2024-01-01');
 const BABY_AWAKE_WINDOW_MS = 4.25 * 60 * 60 * 1000;
 
 const HomeScreen: React.FC = () => {
-  const { timeline, addEntry } = useEvents();
+  // הגנה חזקה: מה שלא יהיה שיחזור מה־context – אנחנו תמיד מסיימים עם מערך
+  const eventsContext = useEvents() as any;
+
+  const timeline: TimelineEntryModel[] =
+    (eventsContext?.timeline as TimelineEntryModel[]) ??
+    (eventsContext?.events as TimelineEntryModel[]) ??
+    [];
+
+  const addEntry =
+    (eventsContext?.addEntry as (entry: TimelineEntryModel) => void) ??
+    (() => {
+      console.warn(
+        'addEntry was called but EventsProvider is not mounted or invalid',
+      );
+    });
 
   const [now, setNow] = useState<Date>(new Date());
 
@@ -77,7 +91,6 @@ const HomeScreen: React.FC = () => {
 
     addEntry(newEntry);
 
-    // פידבק תחושתי קטן
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
     Alert.alert(action.label, 'הפעולה נוספה לציר הזמן של היום 👍');
@@ -262,10 +275,7 @@ const HomeScreen: React.FC = () => {
                 style={[
                   styles.awakeBarFill,
                   {
-                    width: `${Math.min(
-                      awakeProgress ?? 0,
-                      1.3,
-                    ) * 100}%`,
+                    width: `${Math.min(awakeProgress ?? 0, 1.3) * 100}%`,
                     backgroundColor: awakeColor,
                   },
                 ]}
@@ -463,7 +473,7 @@ function getAwakeRingStyle(progress: number | null) {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: '#f1f5f9', // רקע כללי עדין
+    backgroundColor: '#f1f5f9',
   },
   container: {
     paddingHorizontal: 16,
@@ -524,13 +534,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     textAlign: 'right',
-    writingDirection: 'rtl',
   },
   heroBabyAge: {
     color: '#64748b',
     fontSize: 11,
     textAlign: 'right',
-    writingDirection: 'rtl',
   },
   heroClockBlock: {
     alignItems: 'flex-end',
@@ -540,13 +548,11 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#f9fafb',
     textAlign: 'right',
-    writingDirection: 'rtl',
   },
   heroClockDate: {
     fontSize: 12,
     color: 'rgba(241, 245, 249, 0.9)',
     textAlign: 'right',
-    writingDirection: 'rtl',
     marginTop: 2,
   },
   heroTextBlock: {
@@ -558,13 +564,11 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#f9fafb',
     textAlign: 'right',
-    writingDirection: 'rtl',
   },
   heroSubtitle: {
     fontSize: 13,
     color: 'rgba(241, 245, 249, 0.9)',
     textAlign: 'right',
-    writingDirection: 'rtl',
   },
 
   /* ---------- AWAKE BAR ---------- */
@@ -592,13 +596,11 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#f9fafb',
     textAlign: 'right',
-    writingDirection: 'rtl',
   },
   awakeBarSubLabel: {
     fontSize: 11,
     color: 'rgba(241, 245, 249, 0.8)',
     textAlign: 'left',
-    writingDirection: 'rtl',
   },
 
   /* ---------- STATUS CARD ---------- */
@@ -636,14 +638,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     textAlign: 'right',
-    writingDirection: 'rtl',
   },
   statusState: {
     color: '#4f46e5',
     fontSize: 13,
     fontWeight: '600',
     textAlign: 'left',
-    writingDirection: 'rtl',
   },
   statusMetricsRow: {
     flexDirection: 'row-reverse',
@@ -663,14 +663,12 @@ const styles = StyleSheet.create({
     color: '#64748b',
     fontSize: 12,
     textAlign: 'right',
-    writingDirection: 'rtl',
   },
   statusMetricValue: {
     color: '#0f172a',
     fontSize: 13,
     fontWeight: '600',
     textAlign: 'right',
-    writingDirection: 'rtl',
   },
 
   /* ---------- FOCUS CARD ---------- */
@@ -697,7 +695,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     textAlign: 'right',
-    writingDirection: 'rtl',
   },
   chip: {
     flexDirection: 'row-reverse',
@@ -718,7 +715,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     textAlign: 'right',
-    writingDirection: 'rtl',
   },
 
   /* ---------- GENERIC CARD ---------- */
@@ -743,13 +739,11 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     textAlign: 'right',
-    writingDirection: 'rtl',
   },
   cardSubtitle: {
     color: '#64748b',
     fontSize: 13,
     textAlign: 'right',
-    writingDirection: 'rtl',
   },
 
   /* ---------- TODAY SUMMARY ---------- */
@@ -771,14 +765,12 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#64748b',
     textAlign: 'right',
-    writingDirection: 'rtl',
   },
   summaryValue: {
     color: '#0f172a',
     fontSize: 18,
     fontWeight: '700',
     textAlign: 'right',
-    writingDirection: 'rtl',
   },
 
   /* ---------- QUICK ACTIONS ---------- */
@@ -819,7 +811,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     textAlign: 'center',
-    writingDirection: 'rtl',
   },
 
   /* ---------- TIMELINE ---------- */
@@ -849,19 +840,16 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
     textAlign: 'right',
-    writingDirection: 'rtl',
   },
   timelineTime: {
     color: '#64748b',
     fontSize: 12,
     textAlign: 'right',
-    writingDirection: 'rtl',
   },
   timelinePlaceholder: {
     color: '#64748b',
     fontSize: 14,
     lineHeight: 20,
     textAlign: 'right',
-    writingDirection: 'rtl',
   },
 });
