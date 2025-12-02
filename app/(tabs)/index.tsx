@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
@@ -37,13 +38,13 @@ const quickActions: QuickAction[] = [
 // אפשר לעדכן לתאריך הלידה האמיתי
 const BABY_DOB = new Date('2024-01-01');
 
+// חלון ערות מומלץ (למשל ~4 שעות ו־15 דקות)
+const BABY_AWAKE_WINDOW_MS = 4.25 * 60 * 60 * 1000;
+
 const HomeScreen: React.FC = () => {
   const { timeline, addEntry } = useEvents();
 
   const [now, setNow] = useState<Date>(new Date());
-  const [lastFeedAt, setLastFeedAt] = useState<number | null>(null);
-  const [lastSleepAt, setLastSleepAt] = useState<number | null>(null);
-  const [lastDiaperAt, setLastDiaperAt] = useState<number | null>(null);
 
   // שעון – מתעדכן כל דקה
   useEffect(() => {
@@ -76,25 +77,47 @@ const HomeScreen: React.FC = () => {
 
     addEntry(newEntry);
 
-    if (action.id === 'feed') {
-      setLastFeedAt(nowMs);
-    } else if (action.id === 'sleep') {
-      // כרגע מפרשים "הוספת שינה" כסיום שינה – מאז היא ערה
-      setLastSleepAt(nowMs);
-    } else if (action.id === 'diaper') {
-      setLastDiaperAt(nowMs);
-    }
+    // פידבק תחושתי קטן
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
     Alert.alert(action.label, 'הפעולה נוספה לציר הזמן של היום 👍');
   };
 
   const hasTimeline = useMemo(() => timeline.length > 0, [timeline]);
 
+  // טיימליין ממויין מהכי חדש לישן
+  const sortedTimeline = useMemo(
+    () => [...timeline].sort((a, b) => b.timestamp - a.timestamp),
+    [timeline],
+  );
+
+  const lastFeed = useMemo(
+    () => sortedTimeline.find(e => e.type === 'feed') ?? null,
+    [sortedTimeline],
+  );
+  const lastSleep = useMemo(
+    () => sortedTimeline.find(e => e.type === 'sleep') ?? null,
+    [sortedTimeline],
+  );
+  const lastDiaper = useMemo(
+    () => sortedTimeline.find(e => e.type === 'diaper') ?? null,
+    [sortedTimeline],
+  );
+
+  const lastFeedAt = lastFeed?.timestamp ?? null;
+  const lastSleepAt = lastSleep?.timestamp ?? null;
+  const lastDiaperAt = lastDiaper?.timestamp ?? null;
+
   // כמה זמן היא ערה מאז השינה האחרונה
   const awakeDurationMs = useMemo(() => {
     if (!lastSleepAt) return null;
     return now.getTime() - lastSleepAt;
   }, [now, lastSleepAt]);
+
+  const awakeProgress = useMemo(() => {
+    if (!awakeDurationMs) return null;
+    return awakeDurationMs / BABY_AWAKE_WINDOW_MS;
+  }, [awakeDurationMs]);
 
   const awakeDurationLabel = useMemo(() => {
     if (!awakeDurationMs) return 'עדיין לא נרשמה שינה';
@@ -103,30 +126,35 @@ const HomeScreen: React.FC = () => {
 
   const babyStateLabel = useMemo(() => {
     if (!awakeDurationMs) return 'ממתינים לרישום שינה ראשון';
-    const hours = awakeDurationMs / 3_600_000;
+    const ratio = awakeDurationMs / BABY_AWAKE_WINDOW_MS;
 
-    if (hours < 1) return 'נינוחה ושמחה 😌';
-    if (hours < 2) return 'ערה ובמצב טוב 🙂';
-    if (hours < 3) return 'מתחילה להתעייף 🥱';
-    return 'עייפות יתר 😵‍💫';
+    if (ratio < 0.4) return 'נינוחה ושמחה 😌';
+    if (ratio < 0.75) return 'ערה ובמצב טוב 🙂';
+    if (ratio < 1) return 'מתחילה להתעייף 🥱';
+    if (ratio < 1.3) return 'עייפה מאוד, מומלץ להציע שינה 😵‍💫';
+    return 'עייפות יתר – נסו להוריד גירויים ולהרגיע 🤍';
   }, [awakeDurationMs]);
 
   const recommendedActionLabel = useMemo(() => {
     if (!awakeDurationMs) {
       return 'התחל במעקב – רשום שינה, האכלה או חיתול ראשון היום.';
     }
-    const hours = awakeDurationMs / 3_600_000;
 
-    if (hours < 1) {
+    const ratio = awakeDurationMs / BABY_AWAKE_WINDOW_MS;
+
+    if (ratio < 0.4) {
       return 'זמן משחק רגוע, מגע, שיחה וחיוכים 🧸';
     }
-    if (hours < 2) {
-      return 'שקול להוריד גירויים ולהתכונן לשינה הבאה 😴';
+    if (ratio < 0.75) {
+      return 'אפשר להאט קצת את הקצב ולהוריד גירויים חזקים 😴';
     }
-    if (hours < 3) {
+    if (ratio < 1) {
       return 'מומלץ להציע שינה בהקדם כדי למנוע עייפות יתר 💤';
     }
-    return 'נסו להרגיע את הסביבה, להחשיך מעט ולהציע שינה כמה שיותר מהר 🤍';
+    if (ratio < 1.3) {
+      return 'נסו להחשיך מעט, לשמור על שקט ולהוביל לשינה כמה שיותר מהר 🤍';
+    }
+    return 'התמקדו בהרגעה, חיבוק, סביבה שקטה – ונסו להציע שינה מחדש בעדינות.';
   }, [awakeDurationMs]);
 
   // גיל בחודשים
@@ -154,16 +182,19 @@ const HomeScreen: React.FC = () => {
 
   const todayStats: SummaryStat[] = useMemo(
     () => [
-      { label: 'שעות שינה', value: '—' }, // נחשב בהמשך כשיהיו סשנים אמיתיים
+      {
+        label: 'חלון ערות נוכחי',
+        value: awakeDurationMs ? formatDuration(awakeDurationMs) : '—',
+      },
       { label: 'האכלות', value: String(feedCount) },
       { label: 'חיתולים', value: String(diaperCount) },
     ],
-    [feedCount, diaperCount],
+    [feedCount, diaperCount, awakeDurationMs],
   );
 
   const lastEvent = useMemo(
-    () => (timeline.length ? timeline[0] : null),
-    [timeline],
+    () => (sortedTimeline.length ? sortedTimeline[0] : null),
+    [sortedTimeline],
   );
 
   const timeSinceLastEventLabel = useMemo(() => {
@@ -178,6 +209,8 @@ const HomeScreen: React.FC = () => {
     }
     return `היום נרשמו ${feedCount} האכלות, ${diaperCount} חיתולים ו־${sleepCount} פרקי שינה.`;
   }, [timeline.length, feedCount, diaperCount, sleepCount]);
+
+  const awakeColor = getAwakeColor(awakeProgress);
 
   return (
     <ScrollView
@@ -195,7 +228,12 @@ const HomeScreen: React.FC = () => {
         >
           <View style={styles.heroTopRow}>
             <View style={styles.heroBabyPill}>
-              <View style={styles.heroBabyAvatar}>
+              <View
+                style={[
+                  styles.heroBabyAvatar,
+                  getAwakeRingStyle(awakeProgress),
+                ]}
+              >
                 <Text style={styles.heroBabyInitial}>א</Text>
               </View>
               <View style={styles.heroBabyTextBlock}>
@@ -216,6 +254,34 @@ const HomeScreen: React.FC = () => {
               כאן תראה את היום של עלמה במבט אחד
             </Text>
           </View>
+
+          {/* בר חלון ערות */}
+          <View style={styles.awakeBarWrapper}>
+            <View style={styles.awakeBarBackground}>
+              <View
+                style={[
+                  styles.awakeBarFill,
+                  {
+                    width: `${Math.min(
+                      awakeProgress ?? 0,
+                      1.3,
+                    ) * 100}%`,
+                    backgroundColor: awakeColor,
+                  },
+                ]}
+              />
+            </View>
+            <View style={styles.awakeBarTextRow}>
+              <Text style={styles.awakeBarLabel}>
+                {awakeDurationMs
+                  ? `${formatDuration(awakeDurationMs)} ערות`
+                  : 'ממתינים לשינה ראשונה'}
+              </Text>
+              <Text style={styles.awakeBarSubLabel}>
+                חלון מומלץ: {formatDuration(BABY_AWAKE_WINDOW_MS)}
+              </Text>
+            </View>
+          </View>
         </LinearGradient>
       </View>
 
@@ -223,7 +289,7 @@ const HomeScreen: React.FC = () => {
       <View style={styles.statusCard}>
         <View style={styles.statusHeaderRow}>
           <View style={styles.statusTitleRow}>
-            <View style={styles.statusDot} />
+            <View style={[styles.statusDot, { backgroundColor: awakeColor }]} />
             <Text style={styles.statusTitle}>הסטטוס של עלמה</Text>
           </View>
           <Text style={styles.statusState}>{babyStateLabel}</Text>
@@ -307,7 +373,7 @@ const HomeScreen: React.FC = () => {
         <Text style={styles.cardTitle}>ציר הזמן של היום</Text>
         {hasTimeline ? (
           <View style={styles.timelineList}>
-            {timeline.map(entry => (
+            {sortedTimeline.map(entry => (
               <View key={entry.id} style={styles.timelineItem}>
                 <View style={styles.timelineIconCircle}>
                   <Ionicons
@@ -364,8 +430,7 @@ function formatDuration(ms: number): string {
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
 
-  if (hours <= 0 && minutes <= 0) return 'הרגע';
-  if (hours <= 0) return `${minutes} דק׳`;
+  if (totalMinutes <= 0) return 'הרגע';
   if (hours === 0) return `${minutes} דק׳`;
   if (minutes === 0) return `${hours} ש׳`;
   return `${hours} ש׳ ${minutes} דק׳`;
@@ -376,6 +441,21 @@ function formatShortTime(timestamp: number): string {
     hour: '2-digit',
     minute: '2-digit',
   });
+}
+
+function getAwakeColor(progress: number | null): string {
+  if (progress == null) return '#22c55e';
+  if (progress < 0.75) return '#22c55e'; // ירוק
+  if (progress < 1) return '#facc15'; // צהוב
+  return '#f97316'; // כתום
+}
+
+function getAwakeRingStyle(progress: number | null) {
+  const color = getAwakeColor(progress);
+  return {
+    borderWidth: 2,
+    borderColor: color,
+  };
 }
 
 /* ---------- Styles ---------- */
@@ -422,9 +502,9 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(248, 250, 252, 0.9)',
   },
   heroBabyAvatar: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     backgroundColor: '#e0e7ff',
     alignItems: 'center',
     justifyContent: 'center',
@@ -484,6 +564,40 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: 'rgba(241, 245, 249, 0.9)',
     textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+
+  /* ---------- AWAKE BAR ---------- */
+  awakeBarWrapper: {
+    marginTop: 14,
+    gap: 6,
+  },
+  awakeBarBackground: {
+    width: '100%',
+    height: 8,
+    borderRadius: 999,
+    backgroundColor: 'rgba(15, 23, 42, 0.25)',
+    overflow: 'hidden',
+  },
+  awakeBarFill: {
+    height: '100%',
+    borderRadius: 999,
+  },
+  awakeBarTextRow: {
+    flexDirection: 'row-reverse',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  awakeBarLabel: {
+    fontSize: 12,
+    color: '#f9fafb',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  awakeBarSubLabel: {
+    fontSize: 11,
+    color: 'rgba(241, 245, 249, 0.8)',
+    textAlign: 'left',
     writingDirection: 'rtl',
   },
 
