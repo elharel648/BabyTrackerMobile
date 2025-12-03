@@ -4,852 +4,496 @@ import { LinearGradient } from 'expo-linear-gradient';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
+  LayoutAnimation,
+  Platform,
   Pressable,
+  SafeAreaView,
   ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
+  UIManager,
   View,
 } from 'react-native';
+// הסרנו זמנית את victory-native כי הוא גורם לקריסה ב-Web
+// import { VictoryBar, VictoryChart, VictoryAxis } from 'victory-native'; 
+
+import { useColorScheme } from '@/hooks/use-color-scheme';
+import { Colors, Shadows } from '../../constants/theme';
 import {
-  TimelineEntry as TimelineEntryModel,
-  useEvents,
+  TimelineEntryType,
+  useEvents
 } from '../../src/context/EventsProvider';
 
-type QuickActionId = 'feed' | 'sleep' | 'diaper';
+// הפעלת אנימציות באנדרואיד
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 
-type QuickAction = {
-  id: QuickActionId;
-  label: string;
-  icon: keyof typeof Ionicons.glyphMap;
-};
+const BABY_DOB = new Date('2024-06-01'); // תאריך לידה (דוגמה)
 
-type SummaryStat = {
-  label: string;
-  value: string;
-};
-
-// כרגע – תמיד עברית + RTL. אחר כך נוסיף הגדרת שפה + מצב כהה/בהיר.
-const quickActions: QuickAction[] = [
-  { id: 'feed', label: 'הוספת האכלה', icon: 'restaurant' },
-  { id: 'sleep', label: 'הוספת שינה', icon: 'moon' },
-  { id: 'diaper', label: 'החלפת חיתול', icon: 'water' },
-];
-
-// אפשר לעדכן לתאריך הלידה האמיתי
-const BABY_DOB = new Date('2024-01-01');
-
-// חלון ערות מומלץ (למשל ~4 שעות ו־15 דקות)
-const BABY_AWAKE_WINDOW_MS = 4.25 * 60 * 60 * 1000;
-
-const HomeScreen: React.FC = () => {
-  // הגנה חזקה: מה שלא יהיה שיחזור מה־context – אנחנו תמיד מסיימים עם מערך
-  const eventsContext = useEvents() as any;
-
-  const timeline: TimelineEntryModel[] =
-    (eventsContext?.timeline as TimelineEntryModel[]) ??
-    (eventsContext?.events as TimelineEntryModel[]) ??
-    [];
-
-  const addEntry =
-    (eventsContext?.addEntry as (entry: TimelineEntryModel) => void) ??
-    (() => {
-      console.warn(
-        'addEntry was called but EventsProvider is not mounted or invalid',
-      );
-    });
-
+export default function HomeScreen() {
+  const colorScheme = useColorScheme() ?? 'light';
+  const theme = Colors[colorScheme];
+  const { events, addEntry, removeEntry } = useEvents();
   const [now, setNow] = useState<Date>(new Date());
 
-  // שעון – מתעדכן כל דקה
   useEffect(() => {
-    const id = setInterval(() => setNow(new Date()), 60_000);
-    return () => clearInterval(id);
+    const timer = setInterval(() => setNow(new Date()), 60_000);
+    return () => clearInterval(timer);
   }, []);
 
-  const handleQuickAction = (action: QuickAction) => {
-    const nowDate = new Date();
-    const nowMs = nowDate.getTime();
-    const timeString = nowDate.toLocaleTimeString('he-IL', {
-      hour: '2-digit',
-      minute: '2-digit',
-    });
+  // --- לוגיקה וחישובים ---
 
-    const label =
-      action.id === 'feed'
-        ? 'נרשמה האכלה'
-        : action.id === 'sleep'
-        ? 'נרשמה שינה'
-        : 'נרשמה החלפת חיתול';
+  const sortedEvents = useMemo(() => [...events].sort((a, b) => b.timestamp - a.timestamp), [events]);
+  
+  const lastSleep = sortedEvents.find(e => e.type === 'sleep' || e.type === 'wake');
+  const lastFeed = sortedEvents.find(e => e.type === 'feed');
+  const lastDiaper = sortedEvents.find(e => e.type === 'diaper');
 
-    const newEntry: TimelineEntryModel = {
-      id: `${nowMs}-${action.id}`,
-      type: action.id,
-      label,
-      time: timeString,
-      timestamp: nowMs,
+  const isSleeping = lastSleep?.type === 'sleep';
+
+  const minutesSinceSleep = lastSleep ? Math.floor((now.getTime() - lastSleep.timestamp) / 60000) : 0;
+  const minutesSinceFeed = lastFeed ? Math.floor((now.getTime() - lastFeed.timestamp) / 60000) : 0;
+  const minutesSinceDiaper = lastDiaper ? Math.floor((now.getTime() - lastDiaper.timestamp) / 60000) : 0;
+
+  const todayStats = useMemo(() => {
+    const startOfDay = new Date(now);
+    startOfDay.setHours(0, 0, 0, 0);
+    const todayEvents = events.filter(e => e.timestamp >= startOfDay.getTime());
+
+    return {
+      feeds: todayEvents.filter(e => e.type === 'feed').length,
+      diapers: todayEvents.filter(e => e.type === 'diaper').length,
+      sleeps: todayEvents.filter(e => e.type === 'sleep').length,
     };
+  }, [events, now]);
 
-    addEntry(newEntry);
-
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-
-    Alert.alert(action.label, 'הפעולה נוספה לציר הזמן של היום 👍');
-  };
-
-  const hasTimeline = useMemo(() => timeline.length > 0, [timeline]);
-
-  // טיימליין ממויין מהכי חדש לישן
-  const sortedTimeline = useMemo(
-    () => [...timeline].sort((a, b) => b.timestamp - a.timestamp),
-    [timeline],
-  );
-
-  const lastFeed = useMemo(
-    () => sortedTimeline.find(e => e.type === 'feed') ?? null,
-    [sortedTimeline],
-  );
-  const lastSleep = useMemo(
-    () => sortedTimeline.find(e => e.type === 'sleep') ?? null,
-    [sortedTimeline],
-  );
-  const lastDiaper = useMemo(
-    () => sortedTimeline.find(e => e.type === 'diaper') ?? null,
-    [sortedTimeline],
-  );
-
-  const lastFeedAt = lastFeed?.timestamp ?? null;
-  const lastSleepAt = lastSleep?.timestamp ?? null;
-  const lastDiaperAt = lastDiaper?.timestamp ?? null;
-
-  // כמה זמן היא ערה מאז השינה האחרונה
-  const awakeDurationMs = useMemo(() => {
-    if (!lastSleepAt) return null;
-    return now.getTime() - lastSleepAt;
-  }, [now, lastSleepAt]);
-
-  const awakeProgress = useMemo(() => {
-    if (!awakeDurationMs) return null;
-    return awakeDurationMs / BABY_AWAKE_WINDOW_MS;
-  }, [awakeDurationMs]);
-
-  const awakeDurationLabel = useMemo(() => {
-    if (!awakeDurationMs) return 'עדיין לא נרשמה שינה';
-    return formatDuration(awakeDurationMs) + ' ערות';
-  }, [awakeDurationMs]);
-
-  const babyStateLabel = useMemo(() => {
-    if (!awakeDurationMs) return 'ממתינים לרישום שינה ראשון';
-    const ratio = awakeDurationMs / BABY_AWAKE_WINDOW_MS;
-
-    if (ratio < 0.4) return 'נינוחה ושמחה 😌';
-    if (ratio < 0.75) return 'ערה ובמצב טוב 🙂';
-    if (ratio < 1) return 'מתחילה להתעייף 🥱';
-    if (ratio < 1.3) return 'עייפה מאוד, מומלץ להציע שינה 😵‍💫';
-    return 'עייפות יתר – נסו להוריד גירויים ולהרגיע 🤍';
-  }, [awakeDurationMs]);
-
-  const recommendedActionLabel = useMemo(() => {
-    if (!awakeDurationMs) {
-      return 'התחל במעקב – רשום שינה, האכלה או חיתול ראשון היום.';
-    }
-
-    const ratio = awakeDurationMs / BABY_AWAKE_WINDOW_MS;
-
-    if (ratio < 0.4) {
-      return 'זמן משחק רגוע, מגע, שיחה וחיוכים 🧸';
-    }
-    if (ratio < 0.75) {
-      return 'אפשר להאט קצת את הקצב ולהוריד גירויים חזקים 😴';
-    }
-    if (ratio < 1) {
-      return 'מומלץ להציע שינה בהקדם כדי למנוע עייפות יתר 💤';
-    }
-    if (ratio < 1.3) {
-      return 'נסו להחשיך מעט, לשמור על שקט ולהוביל לשינה כמה שיותר מהר 🤍';
-    }
-    return 'התמקדו בהרגעה, חיבוק, סביבה שקטה – ונסו להציע שינה מחדש בעדינות.';
-  }, [awakeDurationMs]);
-
-  // גיל בחודשים
-  const babyAgeLabel = useMemo(() => {
-    const diffMs = now.getTime() - BABY_DOB.getTime();
-    const months = Math.max(Math.floor(diffMs / (1000 * 60 * 60 * 24 * 30)), 0);
-    if (months <= 0) return 'יילודה';
-    if (months === 1) return 'חודש';
-    return `${months} חודשים`;
+  // ברכה חכמה
+  const greeting = useMemo(() => {
+    const h = now.getHours();
+    if (h >= 5 && h < 12) return 'בוקר טוב';
+    if (h >= 12 && h < 18) return 'אחר הצהריים טובים';
+    if (h >= 18 && h < 22) return 'ערב טוב';
+    return 'לילה טוב';
   }, [now]);
 
-  // סטטיסטיקות מהטיימליין
-  const feedCount = useMemo(
-    () => timeline.filter(e => e.type === 'feed').length,
-    [timeline],
-  );
-  const diaperCount = useMemo(
-    () => timeline.filter(e => e.type === 'diaper').length,
-    [timeline],
-  );
-  const sleepCount = useMemo(
-    () => timeline.filter(e => e.type === 'sleep').length,
-    [timeline],
-  );
+  // --- פונקציות עזר ---
 
-  const todayStats: SummaryStat[] = useMemo(
-    () => [
-      {
-        label: 'חלון ערות נוכחי',
-        value: awakeDurationMs ? formatDuration(awakeDurationMs) : '—',
-      },
-      { label: 'האכלות', value: String(feedCount) },
-      { label: 'חיתולים', value: String(diaperCount) },
-    ],
-    [feedCount, diaperCount, awakeDurationMs],
-  );
+  const formatDurationSimple = (minutes: number) => {
+    if (minutes < 60) return `${minutes} דק'`;
+    const h = Math.floor(minutes / 60);
+    const m = minutes % 60;
+    return `${h} ש' ${m} דק'`;
+  };
 
-  const lastEvent = useMemo(
-    () => (sortedTimeline.length ? sortedTimeline[0] : null),
-    [sortedTimeline],
-  );
-
-  const timeSinceLastEventLabel = useMemo(() => {
-    if (!lastEvent) return 'אין אירועים היום עדיין';
-    const diff = now.getTime() - lastEvent.timestamp;
-    return `${formatDuration(diff)} מהאירוע האחרון`;
-  }, [lastEvent, now]);
-
-  const dayOverviewLabel = useMemo(() => {
-    if (!timeline.length) {
-      return 'היום עוד לא התחיל – כל האירועים שתוסיף יופיעו כאן.';
+  const handleAddEvent = (type: TimelineEntryType, label: string) => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    addEntry({
+      id: Date.now().toString(),
+      type,
+      label,
+      time: new Date().toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' }),
+      timestamp: Date.now(),
+    });
+    if (Platform.OS !== 'web') {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     }
-    return `היום נרשמו ${feedCount} האכלות, ${diaperCount} חיתולים ו־${sleepCount} פרקי שינה.`;
-  }, [timeline.length, feedCount, diaperCount, sleepCount]);
+  };
 
-  const awakeColor = getAwakeColor(awakeProgress);
+  const handleDelete = (id: string) => {
+    Alert.alert('מחיקה', 'למחוק את האירוע?', [
+      { text: 'ביטול', style: 'cancel' },
+      { text: 'מחק', style: 'destructive', onPress: () => {
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+        removeEntry(id);
+      }}
+    ]);
+  };
 
   return (
-    <ScrollView
-      style={styles.screen}
-      contentContainerStyle={styles.container}
-      showsVerticalScrollIndicator={false}
-    >
-      {/* HERO עליון – עלמה + שעון + כותרת */}
-      <View style={styles.heroWrapper}>
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
+      <StatusBar barStyle="dark-content" />
+      
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        
+        {/* --- HEADER --- */}
+        <View style={styles.header}>
+          <View>
+            <Text style={[styles.dateText, { color: theme.textMuted }]}>
+              {now.toLocaleDateString('he-IL', { weekday: 'long', day: 'numeric', month: 'long' })}
+            </Text>
+            <Text style={[styles.greetingText, { color: theme.text }]}>{greeting}, אבא</Text>
+          </View>
+          <View style={styles.headerRight}>
+            <View style={[styles.avatarRing, { borderColor: theme.tint }]}>
+              <Text style={{ fontSize: 22 }}>👶</Text>
+            </View>
+          </View>
+        </View>
+
+        {/* --- HERO CARD --- */}
         <LinearGradient
-          colors={['#6366f1', '#a855f7']}
+          colors={isSleeping 
+            ? ['#2C3E50', '#4CA1AF'] 
+            : [theme.heroGradientStart, theme.heroGradientEnd]
+          }
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
-          style={styles.heroCard}
+          style={[styles.heroCard, Shadows.medium]}
         >
-          <View style={styles.heroTopRow}>
-            <View style={styles.heroBabyPill}>
-              <View
-                style={[
-                  styles.heroBabyAvatar,
-                  getAwakeRingStyle(awakeProgress),
-                ]}
-              >
-                <Text style={styles.heroBabyInitial}>א</Text>
-              </View>
-              <View style={styles.heroBabyTextBlock}>
-                <Text style={styles.heroBabyName}>עלמה</Text>
-                <Text style={styles.heroBabyAge}>{babyAgeLabel}</Text>
-              </View>
-            </View>
+          <Ionicons 
+            name={isSleeping ? "moon" : "sunny"} 
+            size={120} 
+            color="rgba(255,255,255,0.1)" 
+            style={styles.heroBgIcon} 
+          />
 
-            <View style={styles.heroClockBlock}>
-              <Text style={styles.heroClockTime}>{formatClockTime(now)}</Text>
-              <Text style={styles.heroClockDate}>{formatDateLine(now)}</Text>
+          <View style={styles.heroTop}>
+            <View style={styles.liveBadge}>
+              <View style={[styles.liveDot, { backgroundColor: isSleeping ? '#818CF8' : '#4ADE80' }]} />
+              <Text style={styles.liveText}>{isSleeping ? 'בשינה' : 'ערה'}</Text>
             </View>
+            <Text style={styles.babyName}>עלמה</Text>
           </View>
 
-          <View style={styles.heroTextBlock}>
-            <Text style={styles.heroGreeting}>היי, אבא של עלמה 👋</Text>
-            <Text style={styles.heroSubtitle}>
-              כאן תראה את היום של עלמה במבט אחד
+          <View style={styles.heroMain}>
+            <Text style={styles.timerText}>
+              {Math.floor(minutesSinceSleep / 60)}
+              <Text style={styles.timerUnit}>ש'</Text>
+              {' : '}
+              {String(minutesSinceSleep % 60).padStart(2, '0')}
+              <Text style={styles.timerUnit}>דק'</Text>
             </Text>
-          </View>
-
-          {/* בר חלון ערות */}
-          <View style={styles.awakeBarWrapper}>
-            <View style={styles.awakeBarBackground}>
-              <View
-                style={[
-                  styles.awakeBarFill,
-                  {
-                    width: `${Math.min(awakeProgress ?? 0, 1.3) * 100}%`,
-                    backgroundColor: awakeColor,
-                  },
-                ]}
-              />
-            </View>
-            <View style={styles.awakeBarTextRow}>
-              <Text style={styles.awakeBarLabel}>
-                {awakeDurationMs
-                  ? `${formatDuration(awakeDurationMs)} ערות`
-                  : 'ממתינים לשינה ראשונה'}
-              </Text>
-              <Text style={styles.awakeBarSubLabel}>
-                חלון מומלץ: {formatDuration(BABY_AWAKE_WINDOW_MS)}
-              </Text>
-            </View>
+            <Text style={styles.timerLabel}>
+              {isSleeping ? 'משך השינה הנוכחית' : 'זמן ערות רצוף'}
+            </Text>
           </View>
         </LinearGradient>
-      </View>
 
-      {/* כרטיס סטטוס עלמה */}
-      <View style={styles.statusCard}>
-        <View style={styles.statusHeaderRow}>
-          <View style={styles.statusTitleRow}>
-            <View style={[styles.statusDot, { backgroundColor: awakeColor }]} />
-            <Text style={styles.statusTitle}>הסטטוס של עלמה</Text>
-          </View>
-          <Text style={styles.statusState}>{babyStateLabel}</Text>
-        </View>
-
-        <View style={styles.statusMetricsRow}>
-          <View style={styles.statusMetric}>
-            <Text style={styles.statusMetricLabel}>ערות</Text>
-            <Text style={styles.statusMetricValue}>{awakeDurationLabel}</Text>
-          </View>
-          <View style={styles.statusMetric}>
-            <Text style={styles.statusMetricLabel}>האכלה אחרונה</Text>
-            <Text style={styles.statusMetricValue}>
-              {lastFeedAt ? formatShortTime(lastFeedAt) : 'לא נרשמה'}
-            </Text>
-          </View>
-          <View style={styles.statusMetric}>
-            <Text style={styles.statusMetricLabel}>חיתול אחרון</Text>
-            <Text style={styles.statusMetricValue}>
-              {lastDiaperAt ? formatShortTime(lastDiaperAt) : 'לא נרשם'}
-            </Text>
-          </View>
-        </View>
-      </View>
-
-      {/* פוקוס כרגע – מה מומלץ לעשות */}
-      <View style={styles.focusCard}>
-        <View style={styles.focusHeaderRow}>
-          <Text style={styles.focusTitle}>פוקוס כרגע</Text>
-          <View style={styles.chip}>
-            <Ionicons name="sparkles" size={14} color="#4f46e5" />
-            <Text style={styles.chipText}>{timeSinceLastEventLabel}</Text>
-          </View>
-        </View>
-        <Text style={styles.focusBody}>{recommendedActionLabel}</Text>
-      </View>
-
-      {/* סיכום היום בקצרה */}
-      <View style={styles.card}>
-        <View style={styles.cardHeaderRow}>
-          <Text style={styles.cardTitle}>היום בקצרה</Text>
-          <Text style={styles.cardSubtitle}>{dayOverviewLabel}</Text>
-        </View>
-        <View style={styles.summaryRow}>
-          {todayStats.map(stat => (
-            <View key={stat.label} style={styles.summaryItem}>
-              <Text style={styles.summaryLabel}>{stat.label}</Text>
-              <Text style={styles.summaryValue}>{stat.value}</Text>
+        {/* --- DASHBOARD WIDGETS --- */}
+        <View style={styles.statsGrid}>
+          <View style={[styles.statCard, { backgroundColor: theme.card }, Shadows.small]}>
+            <View style={[styles.iconCircle, { backgroundColor: theme.eventSleepBg }]}>
+              <Ionicons name="moon" size={20} color={theme.eventSleep} />
             </View>
-          ))}
-        </View>
-      </View>
-
-      {/* פעולות מהירות */}
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>פעולות מהירות</Text>
-        <Text style={styles.cardSubtitle}>
-          הוסף בלחיצה אחת אירועי היום – האכלה, שינה או החלפת חיתול.
-        </Text>
-        <View style={styles.actionsRow}>
-          {quickActions.map(action => (
-            <Pressable
-              key={action.id}
-              onPress={() => handleQuickAction(action)}
-              style={({ pressed }) => [
-                styles.actionButton,
-                pressed && styles.actionButtonPressed,
-              ]}
-            >
-              <View style={styles.actionIconCircle}>
-                <Ionicons name={action.icon} size={24} color="#ffffff" />
-              </View>
-              <Text style={styles.actionLabel}>{action.label}</Text>
-            </Pressable>
-          ))}
-        </View>
-      </View>
-
-      {/* ציר זמן של היום */}
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>ציר הזמן של היום</Text>
-        {hasTimeline ? (
-          <View style={styles.timelineList}>
-            {sortedTimeline.map(entry => (
-              <View key={entry.id} style={styles.timelineItem}>
-                <View style={styles.timelineIconCircle}>
-                  <Ionicons
-                    name={
-                      entry.type === 'feed'
-                        ? 'restaurant'
-                        : entry.type === 'sleep'
-                        ? 'moon'
-                        : 'water'
-                    }
-                    size={18}
-                    color="#4f46e5"
-                  />
-                </View>
-                <View style={styles.timelineTextWrapper}>
-                  <Text style={styles.timelineLabel}>{entry.label}</Text>
-                  <Text style={styles.timelineTime}>{entry.time}</Text>
-                </View>
-              </View>
-            ))}
+            <Text style={[styles.statNumber, { color: theme.text }]}>{todayStats.sleeps}</Text>
+            <Text style={[styles.statLabel, { color: theme.textMuted }]}>שינות היום</Text>
           </View>
-        ) : (
-          <Text style={styles.timelinePlaceholder}>
-            התחל בלחיצה על אחת מהפעולות המהירות כדי לבנות את ציר הזמן של
-            היום.
-          </Text>
-        )}
-      </View>
-    </ScrollView>
+
+          <View style={[styles.statCard, { backgroundColor: theme.card }, Shadows.small]}>
+            <View style={[styles.iconCircle, { backgroundColor: theme.eventFeedBg }]}>
+              <Ionicons name="restaurant" size={20} color={theme.eventFeed} />
+            </View>
+            <Text style={[styles.statNumber, { color: theme.text }]}>{todayStats.feeds}</Text>
+            <Text style={[styles.statLabel, { color: theme.textMuted }]}>ארוחות</Text>
+          </View>
+
+          <View style={[styles.statCard, { backgroundColor: theme.card }, Shadows.small]}>
+            <View style={[styles.iconCircle, { backgroundColor: theme.eventDiaperBg }]}>
+              <Ionicons name="water" size={20} color={theme.eventDiaper} />
+            </View>
+            <Text style={[styles.statNumber, { color: theme.text }]}>{todayStats.diapers}</Text>
+            <Text style={[styles.statLabel, { color: theme.textMuted }]}>חיתולים</Text>
+          </View>
+        </View>
+
+        {/* --- ACTIONS --- */}
+        <Text style={[styles.sectionTitle, { color: theme.text }]}>עדכון מהיר</Text>
+        
+        <View style={styles.smartActionsContainer}>
+          <Pressable
+            style={({pressed}) => [
+              styles.bigActionBtn,
+              { backgroundColor: isSleeping ? '#6366F1' : theme.heroGradientStart, opacity: pressed ? 0.9 : 1 },
+              Shadows.medium
+            ]}
+            onPress={() => handleAddEvent(isSleeping ? 'wake' : 'sleep', isSleeping ? 'התעוררה' : 'הלכה לישון')}
+          >
+            <View style={styles.actionContent}>
+              <Ionicons name={isSleeping ? "sunny" : "moon"} size={32} color="#FFF" />
+              <View>
+                <Text style={styles.bigActionTitle}>{isSleeping ? 'התעוררה' : 'לישון'}</Text>
+                <Text style={styles.bigActionSub}>לחץ לשינוי סטטוס</Text>
+              </View>
+            </View>
+          </Pressable>
+
+          <View style={styles.secondaryActionsRow}>
+            <Pressable 
+              style={({pressed}) => [styles.mediumActionBtn, { backgroundColor: theme.card, opacity: pressed ? 0.9 : 1 }, Shadows.small]}
+              onPress={() => handleAddEvent('feed', 'אוכל')}
+            >
+              <View style={[styles.actionIconBadge, { backgroundColor: theme.eventFeedBg }]}>
+                <Ionicons name="restaurant" size={20} color={theme.eventFeed} />
+              </View>
+              <Text style={[styles.mediumActionLabel, { color: theme.text }]}>אוכל</Text>
+              <Text style={[styles.mediumActionTimer, { color: theme.textMuted }]}>
+                לפני {formatDurationSimple(minutesSinceFeed)}
+              </Text>
+            </Pressable>
+
+            <Pressable 
+              style={({pressed}) => [styles.mediumActionBtn, { backgroundColor: theme.card, opacity: pressed ? 0.9 : 1 }, Shadows.small]}
+              onPress={() => handleAddEvent('diaper', 'חיתול')}
+            >
+              <View style={[styles.actionIconBadge, { backgroundColor: theme.eventDiaperBg }]}>
+                <Ionicons name="water" size={20} color={theme.eventDiaper} />
+              </View>
+              <Text style={[styles.mediumActionLabel, { color: theme.text }]}>חיתול</Text>
+              <Text style={[styles.mediumActionTimer, { color: theme.textMuted }]}>
+                לפני {formatDurationSimple(minutesSinceDiaper)}
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+
+        {/* --- WEEKLY TREND CHART PLACEHOLDER --- */}
+        <View style={[styles.chartContainer, { backgroundColor: theme.card }, Shadows.card]}>
+          <View style={styles.chartHeader}>
+            <Text style={[styles.chartTitle, { color: theme.text }]}>מגמת אכילה שבועית</Text>
+            <Ionicons name="stats-chart" size={18} color={theme.tint} />
+          </View>
+          
+          {/* פלייס-הולדר לגרף כדי שלא יקרוס ב-Web */}
+          <View style={styles.chartPlaceholder}>
+             <View style={[styles.bar, {height: 40, backgroundColor: theme.eventFeed}]} />
+             <View style={[styles.bar, {height: 60, backgroundColor: theme.eventFeed}]} />
+             <View style={[styles.bar, {height: 50, backgroundColor: theme.eventFeed}]} />
+             <View style={[styles.bar, {height: 80, backgroundColor: theme.eventFeed}]} />
+             <View style={[styles.bar, {height: 30, backgroundColor: theme.eventFeed}]} />
+          </View>
+          <Text style={{fontSize: 10, color: theme.textMuted, marginTop: 8}}>גרף מלא זמין באפליקציית מובייל</Text>
+        </View>
+
+        {/* --- RECENT ACTIVITY --- */}
+        <Text style={[styles.sectionTitle, { color: theme.text, marginTop: 10 }]}>פעילות אחרונה</Text>
+        <View style={styles.listContainer}>
+          {sortedEvents.slice(0, 5).map((item, index) => {
+            let dotColor = theme.textLight;
+            let iconName: any = 'ellipse';
+            if (item.type === 'feed') { dotColor = theme.eventFeed; iconName = 'restaurant'; }
+            if (item.type === 'sleep') { dotColor = theme.eventSleep; iconName = 'moon'; }
+            if (item.type === 'wake') { dotColor = theme.success; iconName = 'sunny'; }
+            if (item.type === 'diaper') { dotColor = theme.eventDiaper; iconName = 'water'; }
+
+            return (
+              <Pressable 
+                key={item.id} 
+                onLongPress={() => handleDelete(item.id)}
+                style={({pressed}) => [styles.listItem, { opacity: pressed ? 0.7 : 1 }]}
+              >
+                <View style={styles.listItemTime}>
+                  <Text style={[styles.timeText, { color: theme.textMuted }]}>{item.time}</Text>
+                </View>
+                
+                <View style={styles.listItemIndicator}>
+                  <View style={[styles.indicatorLine, { backgroundColor: index === sortedEvents.length -1 ? 'transparent' : theme.border }]} />
+                  <View style={[styles.indicatorDot, { backgroundColor: theme.card, borderColor: dotColor }]}>
+                    <Ionicons name={iconName} size={10} color={dotColor} />
+                  </View>
+                </View>
+
+                <View style={[styles.listItemContent, { backgroundColor: theme.card, borderColor: theme.border }]}>
+                  <Text style={[styles.itemLabel, { color: theme.text }]}>{item.label}</Text>
+                </View>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        <View style={{ height: 100 }} />
+      </ScrollView>
+    </SafeAreaView>
   );
-};
-
-export default HomeScreen;
-
-/* ---------- Helpers ---------- */
-
-function formatClockTime(date: Date): string {
-  return date.toLocaleTimeString('he-IL', {
-    hour: '2-digit',
-    minute: '2-digit',
-  });
 }
-
-function formatDateLine(date: Date): string {
-  return date.toLocaleDateString('he-IL', {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-  });
-}
-
-function formatDuration(ms: number): string {
-  const totalMinutes = Math.floor(ms / 60_000);
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-
-  if (totalMinutes <= 0) return 'הרגע';
-  if (hours === 0) return `${minutes} דק׳`;
-  if (minutes === 0) return `${hours} ש׳`;
-  return `${hours} ש׳ ${minutes} דק׳`;
-}
-
-function formatShortTime(timestamp: number): string {
-  return new Date(timestamp).toLocaleTimeString('he-IL', {
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
-
-function getAwakeColor(progress: number | null): string {
-  if (progress == null) return '#22c55e';
-  if (progress < 0.75) return '#22c55e'; // ירוק
-  if (progress < 1) return '#facc15'; // צהוב
-  return '#f97316'; // כתום
-}
-
-function getAwakeRingStyle(progress: number | null) {
-  const color = getAwakeColor(progress);
-  return {
-    borderWidth: 2,
-    borderColor: color,
-  };
-}
-
-/* ---------- Styles ---------- */
 
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: '#f1f5f9',
+  container: { flex: 1 },
+  scrollContent: { padding: 20 },
+  
+  // Header
+  header: {
+    flexDirection: 'row-reverse',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
   },
-  container: {
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 32,
-    gap: 16,
-    direction: 'rtl',
+  dateText: { fontSize: 13, textAlign: 'left', fontWeight: '500' },
+  greetingText: { fontSize: 22, fontWeight: '700', textAlign: 'left' },
+  headerRight: { flexDirection: 'row', alignItems: 'center' },
+  avatarRing: { 
+    width: 46, height: 46, borderRadius: 23, borderWidth: 2, 
+    alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFF' 
   },
 
-  /* ---------- HERO ---------- */
-  heroWrapper: {
-    marginBottom: 4,
-  },
+  // Hero
   heroCard: {
     borderRadius: 24,
-    paddingVertical: 18,
-    paddingHorizontal: 18,
-    shadowColor: '#000',
-    shadowOpacity: 0.18,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 5,
-  },
-  heroTopRow: {
-    flexDirection: 'row-reverse',
+    padding: 24,
+    marginBottom: 24,
+    height: 180,
     justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  heroBabyPill: {
-    flexDirection: 'row-reverse',
-    alignItems: 'center',
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 999,
-    backgroundColor: 'rgba(248, 250, 252, 0.9)',
-  },
-  heroBabyAvatar: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: '#e0e7ff',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginLeft: 8,
-  },
-  heroBabyInitial: {
-    color: '#4f46e5',
-    fontWeight: '700',
-    fontSize: 16,
-  },
-  heroBabyTextBlock: {
-    flexDirection: 'column',
-    gap: 2,
-  },
-  heroBabyName: {
-    color: '#0f172a',
-    fontSize: 14,
-    fontWeight: '700',
-    textAlign: 'right',
-  },
-  heroBabyAge: {
-    color: '#64748b',
-    fontSize: 11,
-    textAlign: 'right',
-  },
-  heroClockBlock: {
-    alignItems: 'flex-end',
-  },
-  heroClockTime: {
-    fontSize: 26,
-    fontWeight: '700',
-    color: '#f9fafb',
-    textAlign: 'right',
-  },
-  heroClockDate: {
-    fontSize: 12,
-    color: 'rgba(241, 245, 249, 0.9)',
-    textAlign: 'right',
-    marginTop: 2,
-  },
-  heroTextBlock: {
-    marginTop: 4,
-    gap: 4,
-  },
-  heroGreeting: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: '#f9fafb',
-    textAlign: 'right',
-  },
-  heroSubtitle: {
-    fontSize: 13,
-    color: 'rgba(241, 245, 249, 0.9)',
-    textAlign: 'right',
-  },
-
-  /* ---------- AWAKE BAR ---------- */
-  awakeBarWrapper: {
-    marginTop: 14,
-    gap: 6,
-  },
-  awakeBarBackground: {
-    width: '100%',
-    height: 8,
-    borderRadius: 999,
-    backgroundColor: 'rgba(15, 23, 42, 0.25)',
     overflow: 'hidden',
+    position: 'relative',
   },
-  awakeBarFill: {
-    height: '100%',
-    borderRadius: 999,
+  heroBgIcon: {
+    position: 'absolute',
+    right: -20,
+    bottom: -20,
+    opacity: 0.15,
   },
-  awakeBarTextRow: {
+  heroTop: {
     flexDirection: 'row-reverse',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  awakeBarLabel: {
-    fontSize: 12,
-    color: '#f9fafb',
-    textAlign: 'right',
-  },
-  awakeBarSubLabel: {
-    fontSize: 11,
-    color: 'rgba(241, 245, 249, 0.8)',
-    textAlign: 'left',
-  },
-
-  /* ---------- STATUS CARD ---------- */
-  statusCard: {
-    backgroundColor: '#ffffff',
-    borderRadius: 20,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    shadowColor: '#000',
-    shadowOpacity: 0.04,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 2,
-    gap: 12,
-  },
-  statusHeaderRow: {
-    flexDirection: 'row-reverse',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  statusTitleRow: {
-    flexDirection: 'row-reverse',
-    alignItems: 'center',
-    gap: 6,
-  },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#22c55e',
-  },
-  statusTitle: {
-    color: '#0f172a',
-    fontSize: 14,
+  babyName: {
+    fontSize: 20,
     fontWeight: '700',
-    textAlign: 'right',
+    color: '#FFF',
   },
-  statusState: {
-    color: '#4f46e5',
-    fontSize: 13,
-    fontWeight: '600',
-    textAlign: 'left',
-  },
-  statusMetricsRow: {
-    flexDirection: 'row-reverse',
-    gap: 10,
-  },
-  statusMetric: {
-    flex: 1,
-    backgroundColor: '#f8fafc',
-    borderRadius: 14,
-    paddingVertical: 10,
-    paddingHorizontal: 10,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    gap: 4,
-  },
-  statusMetricLabel: {
-    color: '#64748b',
-    fontSize: 12,
-    textAlign: 'right',
-  },
-  statusMetricValue: {
-    color: '#0f172a',
-    fontSize: 13,
-    fontWeight: '600',
-    textAlign: 'right',
-  },
-
-  /* ---------- FOCUS CARD ---------- */
-  focusCard: {
-    backgroundColor: '#ffffff',
-    borderRadius: 20,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    shadowColor: '#000',
-    shadowOpacity: 0.03,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 1,
-    gap: 8,
-  },
-  focusHeaderRow: {
+  liveBadge: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  focusTitle: {
-    color: '#0f172a',
-    fontSize: 16,
-    fontWeight: '700',
-    textAlign: 'right',
-  },
-  chip: {
-    flexDirection: 'row-reverse',
-    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.2)',
     paddingHorizontal: 10,
     paddingVertical: 4,
-    borderRadius: 999,
-    backgroundColor: '#eff6ff',
+    borderRadius: 12,
     gap: 6,
   },
-  chipText: {
-    color: '#4f46e5',
-    fontSize: 11,
-    fontWeight: '500',
-  },
-  focusBody: {
-    color: '#475569',
-    fontSize: 14,
-    lineHeight: 20,
-    textAlign: 'right',
-  },
+  liveDot: { width: 8, height: 8, borderRadius: 4 },
+  liveText: { color: '#FFF', fontSize: 12, fontWeight: '600' },
+  
+  heroMain: { alignItems: 'center' },
+  timerText: { fontSize: 42, fontWeight: '700', color: '#FFF', fontVariant: ['tabular-nums'] },
+  timerUnit: { fontSize: 18, fontWeight: '400' },
+  timerLabel: { fontSize: 14, color: 'rgba(255,255,255,0.85)', marginTop: -4 },
 
-  /* ---------- GENERIC CARD ---------- */
-  card: {
-    backgroundColor: '#ffffff',
-    borderRadius: 20,
+  // Stats Grid
+  statsGrid: {
+    flexDirection: 'row-reverse',
+    gap: 12,
+    marginBottom: 28,
+  },
+  statCard: {
+    flex: 1,
+    borderRadius: 16,
+    padding: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  iconCircle: {
+    width: 36, height: 36, borderRadius: 18,
+    alignItems: 'center', justifyContent: 'center',
+    marginBottom: 4,
+  },
+  statNumber: { fontSize: 20, fontWeight: '700' },
+  statLabel: { fontSize: 12 },
+
+  // Smart Actions
+  sectionTitle: { fontSize: 18, fontWeight: '700', marginBottom: 12, textAlign: 'left' },
+  smartActionsContainer: { gap: 12, marginBottom: 28 },
+  
+  bigActionBtn: {
+    flexDirection: 'row-reverse',
     padding: 16,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    shadowColor: '#000',
-    shadowOpacity: 0.03,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 1,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  actionContent: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
     gap: 16,
   },
-  cardHeaderRow: {
-    gap: 4,
-  },
-  cardTitle: {
-    color: '#0f172a',
-    fontSize: 18,
-    fontWeight: '700',
-    textAlign: 'right',
-  },
-  cardSubtitle: {
-    color: '#64748b',
-    fontSize: 13,
-    textAlign: 'right',
-  },
+  bigActionTitle: { fontSize: 20, fontWeight: '700', color: '#FFF', textAlign: 'left' },
+  bigActionSub: { fontSize: 13, color: 'rgba(255,255,255,0.8)', textAlign: 'left' },
 
-  /* ---------- TODAY SUMMARY ---------- */
-  summaryRow: {
+  secondaryActionsRow: {
+    flexDirection: 'row-reverse',
+    gap: 12,
+  },
+  mediumActionBtn: {
+    flex: 1,
+    borderRadius: 18,
+    padding: 14,
+    alignItems: 'flex-start', // Align text to left/start
+    justifyContent: 'space-between',
+    height: 100,
+  },
+  actionIconBadge: {
+    width: 34, height: 34, borderRadius: 12,
+    alignItems: 'center', justifyContent: 'center',
+    marginBottom: 8,
+    alignSelf: 'flex-end', // Icon on right
+  },
+  mediumActionLabel: { fontSize: 16, fontWeight: '700', textAlign: 'left', width: '100%' },
+  mediumActionTimer: { fontSize: 12, marginTop: 2, textAlign: 'left', width: '100%' },
+
+  // Chart
+  chartContainer: {
+    borderRadius: 20,
+    padding: 16,
+    marginBottom: 28,
+    alignItems: 'center',
+  },
+  chartHeader: {
+    width: '100%',
     flexDirection: 'row-reverse',
     justifyContent: 'space-between',
-    gap: 10,
-  },
-  summaryItem: {
-    flex: 1,
-    backgroundColor: '#f8fafc',
-    borderRadius: 14,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    gap: 6,
-  },
-  summaryLabel: {
-    fontSize: 13,
-    color: '#64748b',
-    textAlign: 'right',
-  },
-  summaryValue: {
-    color: '#0f172a',
-    fontSize: 18,
-    fontWeight: '700',
-    textAlign: 'right',
-  },
-
-  /* ---------- QUICK ACTIONS ---------- */
-  actionsRow: {
-    flexDirection: 'row-reverse',
-    gap: 10,
-  },
-  actionButton: {
-    flex: 1,
-    backgroundColor: '#f8fafc',
-    borderRadius: 16,
-    paddingVertical: 16,
-    paddingHorizontal: 10,
     alignItems: 'center',
-    gap: 10,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    shadowColor: '#000',
-    shadowOpacity: 0.02,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 1,
+    marginBottom: 10,
+    paddingHorizontal: 4,
   },
-  actionButtonPressed: {
-    opacity: 0.85,
-    transform: [{ scale: 0.97 }],
-  },
-  actionIconCircle: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    backgroundColor: '#4f46e5',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  actionLabel: {
-    color: '#0f172a',
-    fontSize: 14,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-
-  /* ---------- TIMELINE ---------- */
-  timelineList: {
-    gap: 10,
-  },
-  timelineItem: {
-    flexDirection: 'row-reverse',
-    alignItems: 'center',
-    gap: 10,
-    paddingVertical: 6,
-  },
-  timelineIconCircle: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: '#e0e7ff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  timelineTextWrapper: {
-    flex: 1,
+  chartTitle: { fontSize: 16, fontWeight: '700' },
+  chartPlaceholder: {
+    flexDirection: 'row',
     alignItems: 'flex-end',
+    justifyContent: 'center',
+    gap: 10,
+    height: 100,
   },
-  timelineLabel: {
-    color: '#0f172a',
-    fontSize: 14,
-    fontWeight: '500',
-    textAlign: 'right',
+  bar: {
+    width: 20,
+    borderRadius: 4,
   },
-  timelineTime: {
-    color: '#64748b',
-    fontSize: 12,
-    textAlign: 'right',
+
+  // List
+  listContainer: { gap: 0 },
+  listItem: {
+    flexDirection: 'row-reverse',
+    height: 50,
   },
-  timelinePlaceholder: {
-    color: '#64748b',
-    fontSize: 14,
-    lineHeight: 20,
-    textAlign: 'right',
+  listItemTime: {
+    width: 50,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
   },
+  timeText: { fontSize: 12, fontWeight: '600' },
+  listItemIndicator: {
+    width: 30,
+    alignItems: 'center',
+  },
+  indicatorLine: {
+    width: 2,
+    height: '100%',
+    position: 'absolute',
+  },
+  indicatorDot: {
+    width: 18, height: 18, borderRadius: 9,
+    borderWidth: 2,
+    marginTop: 16,
+    alignItems: 'center', justifyContent: 'center',
+    zIndex: 1,
+  },
+  listItemContent: {
+    flex: 1,
+    justifyContent: 'center',
+    paddingRight: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(0,0,0,0.05)',
+  },
+  itemLabel: { fontSize: 15, fontWeight: '500', textAlign: 'left' },
 });

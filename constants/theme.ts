@@ -1,53 +1,128 @@
 /**
- * Below are the colors that are used in the app. The colors are defined in the light and dark mode.
- * There are many other ways to style your app. For example, [Nativewind](https://www.nativewind.dev/), [Tamagui](https://tamagui.dev/), [unistyles](https://reactnativeunistyles.vercel.app), etc.
+ * constants/theme.ts
+ * גרסה עשירה - "Rich Calm"
  */
 
-import { Platform } from 'react-native';
 
-const tintColorLight = '#0a7ea4';
-const tintColorDark = '#fff';
+const palette = {
+  // רקעים - גוונים חמים ועשירים יותר
+  cream: '#F2F6F7',        // רקע כללי - אפור-כחלחל בהיר מאוד, מודרני
+  white: '#FFFFFF',
+  
+  // צבעי מותג
+  sage: '#6B9080',         // ירוק מרווה עמוק
+  sageLight: '#A4C3B2',    // ירוק בהיר
+  mint: '#EAF4F4',         // רקע מנטה עדין
+  
+  primary: '#5B7C99',      // כחול פלדה - רציני ומרגיע
+  secondary: '#F6FFF8',    // לבן-ירקרק
+  
+  // צבעי אירועים (בולטים אך נעימים)
+  feed: '#E6A57E',         // טרה-קוטה בהירה
+  feedBg: '#FFF5EB',       // רקע כתמתם
+  feedAccent: '#FFD8BE',   
+  
+  sleep: '#8E9AAF',        // לבנדר-אפור
+  sleepBg: '#F4F6FA',      // רקע כחלחל
+  sleepAccent: '#D0D9ED',
+
+  diaper: '#8AC6D1',       // תכלת מים
+  diaperBg: '#F0F8FA',     // רקע תכלת
+  diaperAccent: '#BCE3EB',
+  
+  // טקסטים
+  textMain: '#2D3436',     // כמעט שחור
+  textMuted: '#636E72',    // אפור כהה
+  textLight: '#B2BEC3',    // אפור בהיר
+  
+  // סטטוסים
+  success: '#00B894',
+  warning: '#FD9644',
+  error: '#FF7675',
+};
 
 export const Colors = {
   light: {
-    text: '#11181C',
-    background: '#fff',
-    tint: tintColorLight,
-    icon: '#687076',
-    tabIconDefault: '#687076',
-    tabIconSelected: tintColorLight,
+    text: palette.textMain,
+    textMuted: palette.textMuted,
+    textLight: palette.textLight,
+    background: palette.cream,
+    card: palette.white,
+    tint: palette.primary,
+    icon: palette.textMuted,
+    tabIconDefault: '#DAE0E2',
+    tabIconSelected: palette.sage,
+    border: '#DFE6E9',
+    
+    // ספציפי לאירועים
+    eventFeed: palette.feed,
+    eventFeedBg: palette.feedBg,
+    eventFeedAccent: palette.feedAccent,
+    
+    eventSleep: palette.sleep,
+    eventSleepBg: palette.sleepBg,
+    eventSleepAccent: palette.sleepAccent,
+    
+    eventDiaper: palette.diaper,
+    eventDiaperBg: palette.diaperBg,
+    eventDiaperAccent: palette.diaperAccent,
+    
+    // כללי
+    heroGradientStart: '#6B9080',
+    heroGradientEnd: '#5B7C99',
+    success: palette.success,
+    warning: palette.warning,
+    error: palette.error,
   },
   dark: {
-    text: '#ECEDEE',
-    background: '#151718',
-    tint: tintColorDark,
-    icon: '#9BA1A6',
-    tabIconDefault: '#9BA1A6',
-    tabIconSelected: tintColorDark,
+    // ניתן להוסיף התאמה לכהה בהמשך, כרגע נשמור על בהירות
+    text: palette.textMain,
+    textMuted: palette.textMuted,
+    textLight: palette.textLight,
+    background: palette.cream,
+    card: palette.white,
+    tint: palette.primary,
+    icon: palette.textMuted,
+    tabIconDefault: '#DAE0E2',
+    tabIconSelected: palette.sage,
+    border: '#DFE6E9',
+    eventFeed: palette.feed,
+    eventFeedBg: palette.feedBg,
+    eventFeedAccent: palette.feedAccent,
+    eventSleep: palette.sleep,
+    eventSleepBg: palette.sleepBg,
+    eventSleepAccent: palette.sleepAccent,
+    eventDiaper: palette.diaper,
+    eventDiaperBg: palette.diaperBg,
+    eventDiaperAccent: palette.diaperAccent,
+    heroGradientStart: '#6B9080',
+    heroGradientEnd: '#5B7C99',
+    success: palette.success,
+    warning: palette.warning,
+    error: palette.error,
   },
 };
 
-export const Fonts = Platform.select({
-  ios: {
-    /** iOS `UIFontDescriptorSystemDesignDefault` */
-    sans: 'system-ui',
-    /** iOS `UIFontDescriptorSystemDesignSerif` */
-    serif: 'ui-serif',
-    /** iOS `UIFontDescriptorSystemDesignRounded` */
-    rounded: 'ui-rounded',
-    /** iOS `UIFontDescriptorSystemDesignMonospaced` */
-    mono: 'ui-monospace',
+export const Shadows = {
+  small: {
+    shadowColor: '#2D3436',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.03,
+    shadowRadius: 4,
+    elevation: 2,
   },
-  default: {
-    sans: 'normal',
-    serif: 'serif',
-    rounded: 'normal',
-    mono: 'monospace',
+  medium: {
+    shadowColor: '#2D3436',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 4,
   },
-  web: {
-    sans: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
-    serif: "Georgia, 'Times New Roman', serif",
-    rounded: "'SF Pro Rounded', 'Hiragino Maru Gothic ProN', Meiryo, 'MS PGothic', sans-serif",
-    mono: "SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
-  },
-});
+  card: {
+    shadowColor: '#636E72',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 3,
+  }
+};
