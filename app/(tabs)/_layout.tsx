@@ -53,6 +53,15 @@ export default function TabLayout() {
           }}
         />
 
+        {/* 🔥 הוספה: מסך פרופיל (מוסתר מהטאב בר) 🔥 */}
+        <Tabs.Screen
+          name="profile"
+          options={{
+            title: 'פרופיל',
+            href: null, // זה מסתיר את הטאב התחתון, אך מאפשר ניווט
+          }}
+        />
+
       </Tabs>
     </EventsProvider>
   );

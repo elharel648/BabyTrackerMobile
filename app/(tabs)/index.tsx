@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Link } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
@@ -15,8 +16,6 @@ import {
   UIManager,
   View,
 } from 'react-native';
-// הסרנו זמנית את victory-native כי הוא גורם לקריסה ב-Web
-// import { VictoryBar, VictoryChart, VictoryAxis } from 'victory-native'; 
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, Shadows } from '../../constants/theme';
@@ -24,22 +23,54 @@ import {
   TimelineEntryType,
   useEvents
 } from '../../src/context/EventsProvider';
+import { useBabyStats } from '../../src/context/hooks/useBabyStats';
 
 // הפעלת אנימציות באנדרואיד
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
+  UIManager.setLayoutLayoutAnimationEnabledExperimental(true);
 }
 
 const BABY_DOB = new Date('2024-06-01'); // תאריך לידה (דוגמה)
 
+// --- 🔥 רכיב התראה חכמה 🔥 ---
+const PredictionAlert = ({ timeRemainingMinutes, theme, onDismiss }: any) => {
+    if (timeRemainingMinutes <= 0) return null;
+
+    const minutes = Math.round(timeRemainingMinutes % 60);
+    
+    let text = '';
+    if (timeRemainingMinutes < 5) {
+        text = `חלון השינה נפתח! זמן מעולה להרדמה.`;
+    } else if (timeRemainingMinutes < 30) {
+        text = `חלון השינה נפתח בעוד כ- ${minutes} דקות!`;
+    } else {
+        return null; // אם יותר מחצי שעה, לא נציג התראה
+    }
+
+    return (
+        <View style={[styles.predictionAlert, { backgroundColor: theme.eventSleepBg, borderColor: theme.eventSleep }]}>
+            <Ionicons name="alert-circle-outline" size={24} color={theme.eventSleep} />
+            <Text style={[styles.predictionText, { color: theme.textMain }]}>{text}</Text>
+            <Pressable onPress={onDismiss}>
+                <Ionicons name="close-circle-outline" size={20} color={theme.textMuted} />
+            </Pressable>
+        </View>
+    );
+}
+// ----------------------------
+
 export default function HomeScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const theme = Colors[colorScheme];
-  const { events, addEntry, removeEntry } = useEvents();
+  
+  const { events, addEntry, removeEntry, isSleeping } = useEvents(); 
+  const { averageWakeWindowMinutes } = useBabyStats(); 
   const [now, setNow] = useState<Date>(new Date());
+  const [showPrediction, setShowPrediction] = useState(true); 
 
+  // הטיימר רץ כל שנייה
   useEffect(() => {
-    const timer = setInterval(() => setNow(new Date()), 60_000);
+    const timer = setInterval(() => setNow(new Date()), 1000); 
     return () => clearInterval(timer);
   }, []);
 
@@ -47,27 +78,58 @@ export default function HomeScreen() {
 
   const sortedEvents = useMemo(() => [...events].sort((a, b) => b.timestamp - a.timestamp), [events]);
   
-  const lastSleep = sortedEvents.find(e => e.type === 'sleep' || e.type === 'wake');
+  const lastSleepOrWake = sortedEvents.find(e => e.type === 'sleep' || e.type === 'wake');
+  const hasSleepWakeEvents = !!lastSleepOrWake;
+  const veryLastEvent = sortedEvents[0];
+
+  // 1. לוגיקת עצירה: הטיימר רץ רק אם הדיווח האחרון הוא sleep או wake
+  const isCurrentEventCycle = veryLastEvent?.type === 'sleep' || veryLastEvent?.type === 'wake';
+  const isTimerRunning = isCurrentEventCycle && hasSleepWakeEvents;
+
+  // חישוב הזמן בפועל (גם אם לא מוצג כטיימר רץ)
+  const totalMillisecondsToDisplay = isTimerRunning && lastSleepOrWake
+    ? now.getTime() - lastSleepOrWake.timestamp
+    : 0;
+
+  const totalSeconds = Math.floor(totalMillisecondsToDisplay / 1000);
+  const seconds = totalSeconds % 60;
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const minutes = totalMinutes % 60;
+  const hours = Math.floor(totalMinutes / 60);
+
+  // חישובים עבור כרטיסי האוכל והחיתול (בדקות)
   const lastFeed = sortedEvents.find(e => e.type === 'feed');
   const lastDiaper = sortedEvents.find(e => e.type === 'diaper');
-
-  const isSleeping = lastSleep?.type === 'sleep';
-
-  const minutesSinceSleep = lastSleep ? Math.floor((now.getTime() - lastSleep.timestamp) / 60000) : 0;
   const minutesSinceFeed = lastFeed ? Math.floor((now.getTime() - lastFeed.timestamp) / 60000) : 0;
   const minutesSinceDiaper = lastDiaper ? Math.floor((now.getTime() - lastDiaper.timestamp) / 60000) : 0;
-
-  const todayStats = useMemo(() => {
+  
+  // נתונים יומיים לסטטיסטיקה
+  const todayEvents = useMemo(() => {
     const startOfDay = new Date(now);
     startOfDay.setHours(0, 0, 0, 0);
-    const todayEvents = events.filter(e => e.timestamp >= startOfDay.getTime());
-
+    return events.filter(e => e.timestamp >= startOfDay.getTime());
+  }, [events, now]);
+  
+  const todayStats = useMemo(() => {
     return {
       feeds: todayEvents.filter(e => e.type === 'feed').length,
       diapers: todayEvents.filter(e => e.type === 'diaper').length,
       sleeps: todayEvents.filter(e => e.type === 'sleep').length,
     };
-  }, [events, now]);
+  }, [todayEvents]);
+  
+  // לוגיקת החיזוי
+  const minutesSinceLastWake = lastSleepOrWake?.type === 'wake' 
+      ? (now.getTime() - lastSleepOrWake.timestamp) / (1000 * 60) 
+      : 0;
+
+  const timeRemainingUntilSleep = useMemo(() => {
+    if (isSleeping || minutesSinceLastWake === 0) return null; 
+    
+    const remaining = averageWakeWindowMinutes - minutesSinceLastWake;
+    return remaining;
+  }, [isSleeping, minutesSinceLastWake, averageWakeWindowMinutes]);
+
 
   // ברכה חכמה
   const greeting = useMemo(() => {
@@ -81,14 +143,21 @@ export default function HomeScreen() {
   // --- פונקציות עזר ---
 
   const formatDurationSimple = (minutes: number) => {
-    if (minutes < 60) return `${minutes} דק'`;
-    const h = Math.floor(minutes / 60);
-    const m = minutes % 60;
+    if (minutes === undefined || minutes < 0 || isNaN(minutes)) return '---';
+    const totalMinutes = Math.round(minutes);
+    if (totalMinutes < 60) return `${totalMinutes} דק'`;
+    const h = Math.floor(totalMinutes / 60);
+    const m = totalMinutes % 60;
+    
+    if (m === 0) return `${h} שעות`;
+    if (h === 0) return `${m} דק'`;
+    
     return `${h} ש' ${m} דק'`;
   };
 
   const handleAddEvent = (type: TimelineEntryType, label: string) => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    
     addEntry({
       id: Date.now().toString(),
       type,
@@ -96,10 +165,16 @@ export default function HomeScreen() {
       time: new Date().toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' }),
       timestamp: Date.now(),
     });
+
     if (Platform.OS !== 'web') {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     }
+    setShowPrediction(true); 
   };
+
+  const handleStatusToggle = () => {
+      handleAddEvent(isSleeping ? 'wake' : 'sleep', isSleeping ? 'התעוררה' : 'הלכה לישון');
+  }
 
   const handleDelete = (id: string) => {
     Alert.alert('מחיקה', 'למחוק את האירוע?', [
@@ -111,13 +186,97 @@ export default function HomeScreen() {
     ]);
   };
 
+  // 4. רכיב Hero Card דינמי לפי מצב
+  const isInitialState = !hasSleepWakeEvents && events.length === 0;
+
+  const DynamicHeroContent = () => {
+      // 3.1. מצב: התחל מעקב - אם אין אירועים כלל
+      if (isInitialState) {
+          return (
+              <View style={styles.heroMainStart}>
+                  <Text style={styles.timerTextStart}>התחילו לעקוב!</Text>
+                  <Text style={styles.timerLabelStart}>לחצו כאן כדי להתחיל דיווח ראשון.</Text>
+                  <View style={[styles.actionIndicator, { backgroundColor: theme.success }]}>
+                    <Ionicons name="play" size={18} color="#FFF" />
+                    <Text style={styles.actionIndicatorText}>התחלת מעקב</Text>
+                  </View>
+              </View>
+          );
+      }
+
+      // 3.2. מצב: מוכן לפעולה (IDLE) - טיימר עצר
+      // אם יש אירועים אבל הטיימר אינו רץ
+      if (!isTimerRunning) {
+         return (
+             <View style={styles.heroMainStart}>
+                 <Text style={styles.timerTextStart}>מעקב הסטטוס עצר</Text>
+                 <Text style={styles.timerLabelStart}>לחצו כאן כדי להתחיל מחזור חדש</Text>
+                 <View style={[styles.actionIndicator, { backgroundColor: theme.tint }]}>
+                    <Ionicons name="notifications" size={18} color="#FFF" />
+                    <Text style={styles.actionIndicatorText}>דיווח שינה או ערות</Text>
+                 </View>
+             </View>
+         );
+      }
+      
+      // 3.3. מצב: טיימר רץ (ער או ישן)
+      return (
+          <>
+              <View style={styles.heroTop}>
+                  <View style={styles.liveBadge}>
+                      <View style={[styles.liveDot, { backgroundColor: isSleeping ? '#818CF8' : '#4ADE80' }]} />
+                      <Text style={styles.liveText}>{isSleeping ? 'בשינה' : 'ערה'}</Text>
+                  </View>
+                  <Text style={styles.babyName}>עלמה</Text>
+              </View>
+
+              <View style={styles.heroMain}>
+                  <Text style={styles.timerText}>
+                      {hours}
+                      <Text style={styles.timerUnit}>ש'</Text>
+                      {' : '}
+                      {String(minutes).padStart(2, '0')}
+                      <Text style={styles.timerUnit}>דק'</Text>
+                      {' : '} 
+                      {String(seconds).padStart(2, '0')}
+                      <Text style={styles.timerUnit}>שנ'</Text>
+                  </Text>
+                  <Text style={styles.timerLabel}>
+                      {isSleeping ? 'משך השינה הנוכחית' : 'זמן ערות רצוף'}
+                  </Text>
+              </View>
+              
+              <View style={styles.actionIndicatorRow}>
+                  <View style={[styles.actionIndicator, { backgroundColor: isSleeping ? '#818CF8' : '#4ADE80' }]}>
+                      <Ionicons name={isSleeping ? "sunny" : "moon"} size={18} color="#FFF" />
+                      <Text style={styles.actionIndicatorText}>
+                          {isSleeping ? 'סמן כערה' : 'סמן כשינה'}
+                      </Text>
+                  </View>
+              </View>
+          </>
+      );
+  }
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
       <StatusBar barStyle="dark-content" />
       
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         
-        {/* --- HEADER --- */}
+        {/* 🔥 התראה חכמה - מוצגת בראש המסך 🔥 */}
+        {showPrediction && timeRemainingUntilSleep !== null && !isSleeping && lastSleepOrWake?.type === 'wake' && (
+            <PredictionAlert 
+                timeRemainingMinutes={timeRemainingUntilSleep} 
+                theme={theme}
+                onDismiss={() => {
+                    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                    setShowPrediction(false);
+                }}
+            />
+        )}
+        
+        {/* 1. --- HEADER --- */}
         <View style={styles.header}>
           <View>
             <Text style={[styles.dateText, { color: theme.textMuted }]}>
@@ -125,60 +284,98 @@ export default function HomeScreen() {
             </Text>
             <Text style={[styles.greetingText, { color: theme.text }]}>{greeting}, אבא</Text>
           </View>
-          <View style={styles.headerRight}>
-            <View style={[styles.avatarRing, { borderColor: theme.tint }]}>
-              <Text style={{ fontSize: 22 }}>👶</Text>
-            </View>
-          </View>
+          
+          {/* עוטפים את האווטאר ב-Link לניווט */}
+          <Link href="/(tabs)/profile" asChild> 
+            <Pressable>
+                <View style={styles.headerRight}>
+                  <View style={[styles.avatarRing, { borderColor: theme.tint }]}>
+                    <Text style={{ fontSize: 22 }}>👶</Text>
+                  </View>
+                </View>
+            </Pressable>
+          </Link>
         </View>
 
-        {/* --- HERO CARD --- */}
-        <LinearGradient
-          colors={isSleeping 
-            ? ['#2C3E50', '#4CA1AF'] 
-            : [theme.heroGradientStart, theme.heroGradientEnd]
-          }
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={[styles.heroCard, Shadows.medium]}
+        {/* 2. --- HERO CARD (סטטוס ראשי) - אינטראקטיבי */}
+        <Pressable 
+            onPress={handleStatusToggle} 
+            style={({pressed}) => ({ opacity: pressed ? 0.9 : 1 })}
         >
-          <Ionicons 
-            name={isSleeping ? "moon" : "sunny"} 
-            size={120} 
-            color="rgba(255,255,255,0.1)" 
-            style={styles.heroBgIcon} 
-          />
+            <LinearGradient
+                colors={isSleeping 
+                    ? ['#2C3E50', '#4CA1AF'] 
+                    : isTimerRunning ? [theme.heroGradientStart, theme.heroGradientEnd] : ['#6B9080', '#A4C3B2']
+                }
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={[styles.heroCard, Shadows.medium]}
+            >
+                <Ionicons 
+                    name={isSleeping ? "moon" : isTimerRunning ? "sunny" : "play"} 
+                    size={120} 
+                    color="rgba(255,255,255,0.1)" 
+                    style={styles.heroBgIcon} 
+                />
 
-          <View style={styles.heroTop}>
-            <View style={styles.liveBadge}>
-              <View style={[styles.liveDot, { backgroundColor: isSleeping ? '#818CF8' : '#4ADE80' }]} />
-              <Text style={styles.liveText}>{isSleeping ? 'בשינה' : 'ערה'}</Text>
-            </View>
-            <Text style={styles.babyName}>עלמה</Text>
+                <DynamicHeroContent />
+
+            </LinearGradient>
+        </Pressable>
+
+
+        {/* 3. --- ACTIONS (דיווחים מהירים) --- */}
+        <Text style={[styles.sectionTitle, { color: theme.text }]}>דיווחים מהירים</Text>
+        <View style={styles.smartActionsContainer}>
+
+          <View style={styles.secondaryActionsRow}>
+            {/* 🔥🔥 לחצן אוכל - מנווט למודאל 🔥🔥 */}
+            <Link 
+              href={{ pathname: "/modal", params: { eventType: 'feed' } }} 
+              asChild
+            >
+                <Pressable 
+                  style={({pressed}) => [styles.mediumActionBtn, { backgroundColor: theme.card, opacity: pressed ? 0.9 : 1 }, Shadows.small]}
+                >
+                  <View style={[styles.actionIconBadge, { backgroundColor: theme.eventFeedBg }]}>
+                    <Ionicons name="restaurant" size={20} color={theme.eventFeed} />
+                  </View>
+                  <Text style={[styles.mediumActionLabel, { color: theme.text }]}>אוכל</Text>
+                  <Text style={[styles.mediumActionTimer, { color: theme.textMuted }]}>
+                    לפני {formatDurationSimple(minutesSinceFeed)}
+                  </Text>
+                </Pressable>
+            </Link>
+
+            {/* 🔥🔥 לחצן חיתול - מנווט למודאל 🔥🔥 */}
+            <Link 
+              href={{ pathname: "/modal", params: { eventType: 'diaper' } }} 
+              asChild
+            >
+                <Pressable 
+                  style={({pressed}) => [styles.mediumActionBtn, { backgroundColor: theme.card, opacity: pressed ? 0.9 : 1 }, Shadows.small]}
+                >
+                  <View style={[styles.actionIconBadge, { backgroundColor: theme.eventDiaperBg }]}>
+                    <Ionicons name="water" size={20} color={theme.eventDiaper} />
+                  </View>
+                  <Text style={[styles.mediumActionLabel, { color: theme.text }]}>חיתול</Text>
+                  <Text style={[styles.mediumActionTimer, { color: theme.textMuted }]}>
+                    לפני {formatDurationSimple(minutesSinceDiaper)}
+                  </Text>
+                </Pressable>
+            </Link>
           </View>
-
-          <View style={styles.heroMain}>
-            <Text style={styles.timerText}>
-              {Math.floor(minutesSinceSleep / 60)}
-              <Text style={styles.timerUnit}>ש'</Text>
-              {' : '}
-              {String(minutesSinceSleep % 60).padStart(2, '0')}
-              <Text style={styles.timerUnit}>דק'</Text>
-            </Text>
-            <Text style={styles.timerLabel}>
-              {isSleeping ? 'משך השינה הנוכחית' : 'זמן ערות רצוף'}
-            </Text>
-          </View>
-        </LinearGradient>
-
-        {/* --- DASHBOARD WIDGETS --- */}
+        </View>
+        
+        {/* 4. --- DASHBOARD WIDGETS (סטטיסטיקות יומיות) --- */}
+        <Text style={[styles.sectionTitle, { color: theme.text }]}>סיכום היום</Text>
         <View style={styles.statsGrid}>
           <View style={[styles.statCard, { backgroundColor: theme.card }, Shadows.small]}>
             <View style={[styles.iconCircle, { backgroundColor: theme.eventSleepBg }]}>
               <Ionicons name="moon" size={20} color={theme.eventSleep} />
             </View>
             <Text style={[styles.statNumber, { color: theme.text }]}>{todayStats.sleeps}</Text>
-            <Text style={[styles.statLabel, { color: theme.textMuted }]}>שינות היום</Text>
+            <Text style={[styles.statLabel, { color: theme.textMuted }]}>שינות</Text>
           </View>
 
           <View style={[styles.statCard, { backgroundColor: theme.card }, Shadows.small]}>
@@ -198,57 +395,92 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {/* --- ACTIONS --- */}
-        <Text style={[styles.sectionTitle, { color: theme.text }]}>עדכון מהיר</Text>
-        
-        <View style={styles.smartActionsContainer}>
-          <Pressable
-            style={({pressed}) => [
-              styles.bigActionBtn,
-              { backgroundColor: isSleeping ? '#6366F1' : theme.heroGradientStart, opacity: pressed ? 0.9 : 1 },
-              Shadows.medium
-            ]}
-            onPress={() => handleAddEvent(isSleeping ? 'wake' : 'sleep', isSleeping ? 'התעוררה' : 'הלכה לישון')}
-          >
-            <View style={styles.actionContent}>
-              <Ionicons name={isSleeping ? "sunny" : "moon"} size={32} color="#FFF" />
-              <View>
-                <Text style={styles.bigActionTitle}>{isSleeping ? 'התעוררה' : 'לישון'}</Text>
-                <Text style={styles.bigActionSub}>לחץ לשינוי סטטוס</Text>
-              </View>
-            </View>
-          </Pressable>
-
-          <View style={styles.secondaryActionsRow}>
+        {/* 5.5. 🔥 כרטיס קישור למסע גדילה חודשי (עיצוב נקי וקטן) 🔥 */}
+        <Link href="/growth" asChild>
             <Pressable 
-              style={({pressed}) => [styles.mediumActionBtn, { backgroundColor: theme.card, opacity: pressed ? 0.9 : 1 }, Shadows.small]}
-              onPress={() => handleAddEvent('feed', 'אוכל')}
+                style={({ pressed }) => [
+                    styles.growthCard, 
+                    { 
+                        opacity: pressed ? 0.9 : 1, 
+                        backgroundColor: theme.card, 
+                    }, 
+                    Shadows.small
+                ]}
             >
-              <View style={[styles.actionIconBadge, { backgroundColor: theme.eventFeedBg }]}>
-                <Ionicons name="restaurant" size={20} color={theme.eventFeed} />
-              </View>
-              <Text style={[styles.mediumActionLabel, { color: theme.text }]}>אוכל</Text>
-              <Text style={[styles.mediumActionTimer, { color: theme.textMuted }]}>
-                לפני {formatDurationSimple(minutesSinceFeed)}
-              </Text>
+                <View style={styles.growthCardInnerClean}>
+                    <Text style={[styles.growthTitleClean, { color: theme.text }]}>
+                        מסע גדילה חודשי 📸
+                    </Text>
+                    <Text style={[styles.growthSubtitleClean, { color: theme.textMuted }]}>
+                        בנו קולאז' תמונות מעוצב (לחצו לצפייה).
+                    </Text>
+                </View>
             </Pressable>
+        </Link>
 
-            <Pressable 
-              style={({pressed}) => [styles.mediumActionBtn, { backgroundColor: theme.card, opacity: pressed ? 0.9 : 1 }, Shadows.small]}
-              onPress={() => handleAddEvent('diaper', 'חיתול')}
-            >
-              <View style={[styles.actionIconBadge, { backgroundColor: theme.eventDiaperBg }]}>
-                <Ionicons name="water" size={20} color={theme.eventDiaper} />
-              </View>
-              <Text style={[styles.mediumActionLabel, { color: theme.text }]}>חיתול</Text>
-              <Text style={[styles.mediumActionTimer, { color: theme.textMuted }]}>
-                לפני {formatDurationSimple(minutesSinceDiaper)}
-              </Text>
-            </Pressable>
-          </View>
+
+        {/* 5. --- RECENT ACTIVITY (פעילות אחרונה) --- */}
+        <Text style={[styles.sectionTitle, { color: theme.text, marginTop: 10 }]}>ציר זמן</Text>
+        <View style={styles.listContainer}>
+          {sortedEvents.slice(0, 5).map((item, index) => {
+            let dotColor = theme.textLight;
+            let iconName: any = 'ellipse';
+            let itemContentStyle: any = { backgroundColor: theme.card };
+            
+            // הגדרת צבעים לפי סוג האירוע
+            if (item.type === 'feed') { dotColor = theme.eventFeed; iconName = 'restaurant'; itemContentStyle.backgroundColor = theme.eventFeedBg; }
+            if (item.type === 'sleep') { dotColor = theme.eventSleep; iconName = 'moon'; itemContentStyle.backgroundColor = theme.eventSleepBg; }
+            if (item.type === 'wake') { dotColor = theme.success; iconName = 'sunny'; itemContentStyle.backgroundColor = theme.success + '20'; } // צבע עדין
+            if (item.type === 'diaper') { dotColor = theme.eventDiaper; iconName = 'water'; itemContentStyle.backgroundColor = theme.eventDiaperBg; }
+            
+            // הבלטה דרמטית של האירוע האחרון (index 0)
+            const isLastEvent = index === 0;
+            if (isLastEvent) {
+                itemContentStyle = { ...itemContentStyle, paddingVertical: 18, borderRadius: 10 }; 
+            } else {
+                itemContentStyle.paddingVertical = 12; // ברירת מחדל לשאר הפריטים
+                itemContentStyle.borderRadius = 0;
+            }
+
+
+            return (
+              <Pressable 
+                key={item.id} 
+                onLongPress={() => handleDelete(item.id)}
+                style={({pressed}) => [
+                    styles.listItem, 
+                    { opacity: pressed ? 0.7 : 1, height: isLastEvent ? 60 : 50, paddingHorizontal: isLastEvent ? 0 : 0 }
+                ]}
+              >
+                <View style={[styles.listItemTime, { width: 55 }]}>
+                  <Text style={[styles.timeText, { color: isLastEvent ? theme.textMain : theme.textMuted, fontWeight: isLastEvent ? '700' : '600' }]}>{item.time}</Text>
+                </View>
+                
+                <View style={styles.listItemIndicator}>
+                  <View style={[styles.indicatorLine, { backgroundColor: index === sortedEvents.length -1 ? 'transparent' : theme.border }]} />
+                  <View style={[styles.indicatorDot, { backgroundColor: theme.card, borderColor: dotColor, transform: isLastEvent ? [{ scale: 1.3 }] : [{ scale: 1 }] }]}>
+                    <Ionicons name={iconName} size={10} color={dotColor} />
+                  </View>
+                </View>
+
+                {/* משתמשים ב-itemContentStyle המעוצב לשינוי רקע דרמטי */}
+                <View style={[styles.listItemContent, itemContentStyle, { borderColor: theme.border, borderBottomWidth: index < sortedEvents.slice(0,4).length -1 ? 1 : 0 }]}>
+                  <Text style={[styles.itemLabel, { color: theme.text, fontWeight: isLastEvent ? '700' : '500' }]}>{item.label}</Text>
+                  
+                  {/* הצגת משך השינה אם קיים */}
+                  {item.durationMinutes !== undefined && item.type !== 'wake' && (
+                     <Text style={[styles.timeText, { color: theme.textMuted, fontSize: 11 }]}>
+                         משך: {formatDurationSimple(item.durationMinutes)}
+                     </Text>
+                  )}
+                </View>
+              </Pressable>
+            );
+          })}
         </View>
 
-        {/* --- WEEKLY TREND CHART PLACEHOLDER --- */}
+        {/* 6. --- WEEKLY TREND CHART PLACEHOLDER (מגמות) --- */}
+        <Text style={[styles.sectionTitle, { color: theme.text, marginTop: 20 }]}>מגמות שבועיות</Text>
         <View style={[styles.chartContainer, { backgroundColor: theme.card }, Shadows.card]}>
           <View style={styles.chartHeader}>
             <Text style={[styles.chartTitle, { color: theme.text }]}>מגמת אכילה שבועית</Text>
@@ -264,42 +496,6 @@ export default function HomeScreen() {
              <View style={[styles.bar, {height: 30, backgroundColor: theme.eventFeed}]} />
           </View>
           <Text style={{fontSize: 10, color: theme.textMuted, marginTop: 8}}>גרף מלא זמין באפליקציית מובייל</Text>
-        </View>
-
-        {/* --- RECENT ACTIVITY --- */}
-        <Text style={[styles.sectionTitle, { color: theme.text, marginTop: 10 }]}>פעילות אחרונה</Text>
-        <View style={styles.listContainer}>
-          {sortedEvents.slice(0, 5).map((item, index) => {
-            let dotColor = theme.textLight;
-            let iconName: any = 'ellipse';
-            if (item.type === 'feed') { dotColor = theme.eventFeed; iconName = 'restaurant'; }
-            if (item.type === 'sleep') { dotColor = theme.eventSleep; iconName = 'moon'; }
-            if (item.type === 'wake') { dotColor = theme.success; iconName = 'sunny'; }
-            if (item.type === 'diaper') { dotColor = theme.eventDiaper; iconName = 'water'; }
-
-            return (
-              <Pressable 
-                key={item.id} 
-                onLongPress={() => handleDelete(item.id)}
-                style={({pressed}) => [styles.listItem, { opacity: pressed ? 0.7 : 1 }]}
-              >
-                <View style={styles.listItemTime}>
-                  <Text style={[styles.timeText, { color: theme.textMuted }]}>{item.time}</Text>
-                </View>
-                
-                <View style={styles.listItemIndicator}>
-                  <View style={[styles.indicatorLine, { backgroundColor: index === sortedEvents.length -1 ? 'transparent' : theme.border }]} />
-                  <View style={[styles.indicatorDot, { backgroundColor: theme.card, borderColor: dotColor }]}>
-                    <Ionicons name={iconName} size={10} color={dotColor} />
-                  </View>
-                </View>
-
-                <View style={[styles.listItemContent, { backgroundColor: theme.card, borderColor: theme.border }]}>
-                  <Text style={[styles.itemLabel, { color: theme.text }]}>{item.label}</Text>
-                </View>
-              </Pressable>
-            );
-          })}
         </View>
 
         <View style={{ height: 100 }} />
@@ -369,8 +565,45 @@ const styles = StyleSheet.create({
   timerText: { fontSize: 42, fontWeight: '700', color: '#FFF', fontVariant: ['tabular-nums'] },
   timerUnit: { fontSize: 18, fontWeight: '400' },
   timerLabel: { fontSize: 14, color: 'rgba(255,255,255,0.85)', marginTop: -4 },
+  
+  // 🔥 מצבי התחלה / Idle 🔥
+  heroMainStart: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 15,
+    paddingVertical: 20,
+  },
+  timerTextStart: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: '#FFF',
+  },
+  timerLabelStart: {
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.85)',
+  },
 
-  // Stats Grid
+  actionIndicatorRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginTop: 10,
+  },
+  actionIndicator: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    gap: 8,
+  },
+  actionIndicatorText: {
+    color: '#FFF',
+    fontWeight: '700',
+    fontSize: 14,
+  },
+
+  // Stats Grid (סדר חדש: הסטטיסטיקות נמצאות אחרי הפעולות)
   statsGrid: {
     flexDirection: 'row-reverse',
     gap: 12,
@@ -392,7 +625,7 @@ const styles = StyleSheet.create({
   statNumber: { fontSize: 20, fontWeight: '700' },
   statLabel: { fontSize: 12 },
 
-  // Smart Actions
+  // Smart Actions (סדר חדש: הפעולות נמצאות לפני הסטטיסטיקות)
   sectionTitle: { fontSize: 18, fontWeight: '700', marginBottom: 12, textAlign: 'left' },
   smartActionsContainer: { gap: 12, marginBottom: 28 },
   
@@ -432,6 +665,35 @@ const styles = StyleSheet.create({
   mediumActionLabel: { fontSize: 16, fontWeight: '700', textAlign: 'left', width: '100%' },
   mediumActionTimer: { fontSize: 12, marginTop: 2, textAlign: 'left', width: '100%' },
 
+  // 🔥 סגנונות חדשים לכרטיס מסע הגדילה (עיצוב נקי וקטן) 🔥
+  growthCard: {
+      flexDirection: 'row', // נשנה ל-row רגיל כי זה יותר נקי
+      justifyContent: 'center', 
+      alignItems: 'center',
+      padding: 12, // קטן יותר
+      borderRadius: 16,
+      marginBottom: 28,
+      minHeight: 60, // קטן יותר
+  },
+  growthCardInnerClean: { 
+      // ממקם את הטקסט במרכז
+      alignItems: 'center', 
+      justifyContent: 'center',
+      paddingHorizontal: 5, 
+  },
+  growthTitleClean: {
+      fontSize: 16,
+      fontWeight: '700',
+      textAlign: 'center',
+  },
+  growthSubtitleClean: {
+      fontSize: 12,
+      textAlign: 'center',
+      marginTop: 2,
+      color: Colors.light.textMuted,
+  },
+  // 🔥 סוף סגנונות חדשים 🔥
+
   // Chart
   chartContainer: {
     borderRadius: 20,
@@ -461,20 +723,24 @@ const styles = StyleSheet.create({
   },
 
   // List
-  listContainer: { gap: 0 },
+  listContainer: { gap: 0, borderRadius: 16, overflow: 'hidden' }, // הוספנו סטייל קונטיינר לעיגול פינות
   listItem: {
     flexDirection: 'row-reverse',
-    height: 50,
+    alignItems: 'center',
+    paddingVertical: 0, 
   },
   listItemTime: {
-    width: 50,
+    width: 55,
     alignItems: 'flex-end',
     justifyContent: 'center',
+    alignSelf: 'stretch',
   },
   timeText: { fontSize: 12, fontWeight: '600' },
   listItemIndicator: {
     width: 30,
     alignItems: 'center',
+    alignSelf: 'stretch',
+    paddingVertical: 15,
   },
   indicatorLine: {
     width: 2,
@@ -484,7 +750,6 @@ const styles = StyleSheet.create({
   indicatorDot: {
     width: 18, height: 18, borderRadius: 9,
     borderWidth: 2,
-    marginTop: 16,
     alignItems: 'center', justifyContent: 'center',
     zIndex: 1,
   },
@@ -492,8 +757,8 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     paddingRight: 10,
+    paddingVertical: 12, // ברירת מחדל
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(0,0,0,0.05)',
   },
   itemLabel: { fontSize: 15, fontWeight: '500', textAlign: 'left' },
 });

@@ -16,8 +16,13 @@ export type TimelineEntry = {
   id: string;
   type: TimelineEntryType;
   label: string;
-  time: string; // HH:MM
-  timestamp: number; // Date.now()
+  time: string; // HH:MM (לצורך הצגה)
+  timestamp: number; // Date.now() (זמן יצירה)
+  
+  // 🔥 הוספת שדות לניהול משך שינה 🔥
+  start?: number; // timestamp: זמן התחלה (עבור אירועי שינה)
+  end?: number;   // timestamp: זמן סיום (עבור אירועי שינה)
+  durationMinutes?: number; // משך (עבור אירועי שינה שהסתיימו)
 };
 
 type EventsContextValue = {
@@ -27,6 +32,7 @@ type EventsContextValue = {
   removeEntry: (id: string) => void;
   clearAll: () => void;
   isLoading: boolean; // כדי שנוכל לדעת אם הנתונים עדיין נטענים
+  isSleeping: boolean; // 🔥 סטטוס שינה נוכחי 🔥
 };
 
 const STORAGE_KEY = '@baby_tracker_events_v1';
@@ -45,7 +51,9 @@ export const EventsProvider: React.FC<{ children: ReactNode }> = ({
       try {
         const jsonValue = await AsyncStorage.getItem(STORAGE_KEY);
         if (jsonValue != null) {
-          setEvents(JSON.parse(jsonValue));
+          // לוודא שה-timestamps נשארים מספרים
+          const loadedEvents: TimelineEntry[] = JSON.parse(jsonValue);
+          setEvents(loadedEvents);
         }
       } catch (e) {
         console.error('Failed to load events', e);
@@ -59,7 +67,6 @@ export const EventsProvider: React.FC<{ children: ReactNode }> = ({
 
   // 2. שמירת נתונים בכל שינוי
   useEffect(() => {
-    // מונע דריסה של הזיכרון עם מערך ריק בזמן הטעינה הראשונית
     if (!isLoading) {
       const saveData = async () => {
         try {
@@ -71,10 +78,50 @@ export const EventsProvider: React.FC<{ children: ReactNode }> = ({
       saveData();
     }
   }, [events, isLoading]);
-
+  
+  // 🔥🔥🔥 לוגיקת הוספת אירוע חכמה 🔥🔥🔥
   const addEntry = useCallback((entry: TimelineEntry) => {
-    setEvents(prev => [...prev, entry]);
+    setEvents(prevEvents => {
+      // אם האירוע הוא "התעוררות" (wake)
+      if (entry.type === 'wake') {
+        const lastSleepIndex = prevEvents.findIndex(
+          e => e.type === 'sleep' && !e.end 
+        );
+
+        // אם נמצא אירוע שינה פתוח
+        if (lastSleepIndex !== -1) {
+          const sleepEvent = prevEvents[lastSleepIndex];
+          const endTime = entry.timestamp;
+          const startTime = sleepEvent.start || sleepEvent.timestamp;
+          
+          const durationMinutes = Math.round((endTime - startTime) / (1000 * 60));
+          
+          // יצירת עותק מעודכן של רשימת האירועים
+          const newEvents = [...prevEvents];
+          
+          // עדכון אירוע השינה הקיים
+          newEvents[lastSleepIndex] = {
+            ...sleepEvent,
+            end: endTime,
+            durationMinutes: durationMinutes,
+          };
+          
+          // הוספת אירוע ה-wake לרשימה
+          return [...newEvents, entry];
+        }
+      }
+      
+      // אם האירוע הוא "שינה" (sleep), שומרים את ה-timestamp כ-start
+      if (entry.type === 'sleep') {
+          return [...prevEvents, { ...entry, start: entry.timestamp }];
+      }
+
+      // עבור כל אירוע אחר (feed, diaper, wake ללא sleep פתוח)
+      return [...prevEvents, entry];
+    });
   }, []);
+  // 🔥🔥🔥 סוף לוגיקת הוספת אירוע חכמה 🔥🔥🔥
+
 
   const removeEntry = useCallback((id: string) => {
     setEvents(prev => prev.filter(e => e.id !== id));
@@ -89,20 +136,29 @@ export const EventsProvider: React.FC<{ children: ReactNode }> = ({
     }
   }, []);
 
-  const timeline = useMemo(() => {
-    return events;
+  const sortedEvents = useMemo(() => {
+    return events.sort((a, b) => b.timestamp - a.timestamp);
   }, [events]);
+  
+  const timeline = sortedEvents;
+
+  // 🔥 חישוב סטטוס שינה 🔥
+  const isSleeping = useMemo(() => {
+    const lastSleep = sortedEvents.find(e => e.type === 'sleep' || e.type === 'wake');
+    return lastSleep?.type === 'sleep' && !lastSleep.end;
+  }, [sortedEvents]);
 
   const value: EventsContextValue = useMemo(
     () => ({
-      events,
+      events: sortedEvents, // מעביר את האירועים ממוינים
       timeline,
       addEntry,
       removeEntry,
       clearAll,
       isLoading,
+      isSleeping, // 🔥
     }),
-    [events, timeline, addEntry, removeEntry, clearAll, isLoading],
+    [sortedEvents, timeline, addEntry, removeEntry, clearAll, isLoading, isSleeping],
   );
 
   return (
@@ -113,6 +169,7 @@ export const EventsProvider: React.FC<{ children: ReactNode }> = ({
 export const useEvents = () => {
   const ctx = useContext(EventsContext);
   if (!ctx) {
+    // 🔥 עדכון ערכי ברירת המחדל 🔥
     return {
       events: [],
       timeline: [],
@@ -120,7 +177,10 @@ export const useEvents = () => {
       removeEntry: () => {},
       clearAll: () => {},
       isLoading: false,
+      isSleeping: false,
     } as EventsContextValue;
   }
   return ctx;
 };
+
+// 🔥 ודא שמחקת את EventsProvider.tsx הלא נחוץ בתיקייה הראשית (אם קיים) 🔥

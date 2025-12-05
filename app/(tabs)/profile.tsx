@@ -14,21 +14,43 @@ import {
 } from 'react-native';
 import { Colors, Shadows } from '../../constants/theme';
 
+// 🔥🔥 נשתמש ב-Mock State עבור Authentication עד שנתקין Backend 🔥🔥
+type AuthState = 'LOGGED_OUT' | 'LOGGED_IN';
+
 export default function ProfileScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const theme = Colors[colorScheme];
-
+  
+  // 🔥 מצב מדומה של חיבור: נניח שהמשתמש מחובר כברירת מחדל 🔥
+  const [authState, setAuthState] = useState<AuthState>('LOGGED_IN');
+  
   // מצבים זמניים (בהמשך נחבר ל-Backend)
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [darkModeEnabled, setDarkModeEnabled] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
 
+  // --- פונקציות Mock ---
+  const handleAuth = (type: 'login' | 'google' | 'facebook' | 'logout') => {
+      if (type === 'logout') {
+          Alert.alert('התנתקות', 'בטוח שרוצה להתנתק?', [
+              { text: 'ביטול', style: 'cancel' },
+              { text: 'התנתק', style: 'destructive', onPress: () => setAuthState('LOGGED_OUT') }
+          ]);
+      } else if (type === 'login') {
+          Alert.alert('התחברות (Mock)', 'התחברת בהצלחה!', [{ text: 'אישור', onPress: () => setAuthState('LOGGED_IN') }]);
+      } else {
+          Alert.alert('חיבור באמצעות ' + type, 'פיצ\'ר זה דורש תצורת Backend', [{ text: 'אישור' }]);
+      }
+  };
+
+
   // רכיב עזר: שורת הגדרה
-  const SettingRow = ({ icon, title, subtitle, isDestructive = false, onPress, value, onToggle, iconColor, iconBg }: any) => (
+  const SettingRow = ({ icon, title, subtitle, isDestructive = false, onPress, value, onToggle, iconColor, iconBg, hasSwitch = false }: any) => (
     <TouchableOpacity 
       style={[styles.row, { backgroundColor: theme.card }]} 
       onPress={onToggle ? () => onToggle(!value) : onPress}
       activeOpacity={onToggle ? 1 : 0.7}
+      disabled={hasSwitch && onToggle === undefined} // אם יש סוויץ' והוא לא עביר, ננטרל לחיצה על השורה כולה.
     >
       <View style={styles.rowLeft}>
         <View style={[styles.iconContainer, { backgroundColor: iconBg || theme.background }]}>
@@ -40,7 +62,7 @@ export default function ProfileScreen() {
         </View>
       </View>
       
-      {onToggle !== undefined ? (
+      {hasSwitch ? (
         <Switch
           value={value}
           onValueChange={onToggle}
@@ -48,7 +70,7 @@ export default function ProfileScreen() {
           thumbColor={'#f4f3f4'}
         />
       ) : (
-        <Ionicons name="chevron-back" size={20} color={theme.textLight} /> // חץ שמאלה לעברית
+        <Ionicons name={isDestructive ? "trash-outline" : "chevron-back"} size={20} color={isDestructive ? theme.error : theme.textLight} /> 
       )}
     </TouchableOpacity>
   );
@@ -58,6 +80,67 @@ export default function ProfileScreen() {
     <Text style={[styles.sectionHeader, { color: theme.textMuted }]}>{title}</Text>
   );
 
+  // --- תוכן דינמי: כרטיס פרופיל או כרטיס חיבור ---
+  const ProfileSection = () => {
+    if (authState === 'LOGGED_OUT') {
+      return (
+        <View style={[styles.profileCard, { backgroundColor: theme.card }, Shadows.medium]}>
+          <Text style={[styles.loginHeader, { color: theme.text }]}>התחברות והרשמה</Text>
+          <Text style={[styles.loginSubheader, { color: theme.textMuted }]}>
+            התחבר כדי לשמור ולסנכרן את נתוני המעקב שלך.
+          </Text>
+
+          <TouchableOpacity 
+            style={[styles.authButton, { backgroundColor: theme.tint }]} 
+            onPress={() => handleAuth('login')}
+          >
+             <Text style={styles.authButtonText}>התחבר עם אימייל וסיסמה</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={[styles.authButtonSocial, { backgroundColor: '#DB4437', marginTop: 10 }]} 
+            onPress={() => handleAuth('google')}
+          >
+             <Ionicons name="logo-google" size={20} color="#FFF" style={styles.socialIcon} />
+             <Text style={styles.authButtonText}>התחבר באמצעות Google</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={[styles.authButtonSocial, { backgroundColor: '#4267B2', marginTop: 10 }]} 
+            onPress={() => handleAuth('facebook')}
+          >
+             <Ionicons name="logo-facebook" size={20} color="#FFF" style={styles.socialIcon} />
+             <Text style={styles.authButtonText}>התחבר באמצעות Facebook</Text>
+          </TouchableOpacity>
+          
+        </View>
+      );
+    }
+    
+    // מצב מחובר (LOGGED_IN)
+    return (
+      <View style={[styles.profileCard, { backgroundColor: theme.card }, Shadows.medium]}>
+        <View style={styles.profileHeader}>
+          <View style={styles.avatarContainer}>
+            <Text style={styles.avatarText}>א</Text>
+            <View style={styles.editBadge}>
+              <Ionicons name="pencil" size={12} color="#FFF" />
+            </View>
+          </View>
+          <View style={styles.profileInfo}>
+            <Text style={[styles.profileName, { color: theme.text }]}>אבא של עלמה</Text>
+            <Text style={[styles.profileEmail, { color: theme.textMuted }]}>aba@example.com</Text>
+            <View style={[styles.roleBadge, { backgroundColor: theme.tint + '20' }]}>
+              <Text style={[styles.roleText, { color: theme.tint }]}>מנהל משפחה 👑</Text>
+            </View>
+          </View>
+        </View>
+      </View>
+    );
+  };
+  
+  // ----------------------------------------------------
+  
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
       <StatusBar barStyle={colorScheme === 'dark' ? 'light-content' : 'dark-content'} />
@@ -67,25 +150,9 @@ export default function ProfileScreen() {
         {/* --- HEADER & PROFILE CARD --- */}
         <Text style={[styles.pageTitle, { color: theme.text }]}>הגדרות ופרופיל</Text>
 
-        <View style={[styles.profileCard, { backgroundColor: theme.card }, Shadows.medium]}>
-          <View style={styles.profileHeader}>
-            <View style={styles.avatarContainer}>
-              <Text style={styles.avatarText}>א</Text>
-              <View style={styles.editBadge}>
-                <Ionicons name="pencil" size={12} color="#FFF" />
-              </View>
-            </View>
-            <View style={styles.profileInfo}>
-              <Text style={[styles.profileName, { color: theme.text }]}>אבא של עלמה</Text>
-              <Text style={[styles.profileEmail, { color: theme.textMuted }]}>aba@example.com</Text>
-              <View style={[styles.roleBadge, { backgroundColor: theme.tint + '20' }]}>
-                <Text style={[styles.roleText, { color: theme.tint }]}>מנהל משפחה 👑</Text>
-              </View>
-            </View>
-          </View>
-        </View>
+        {ProfileSection()}
 
-        {/* --- SETTINGS SECTIONS --- */}
+        {/* --- SETTINGS SECTIONS (מוצג רק אם מחובר או כבסיס) --- */}
 
         {/* קבוצה 1: הבייבי */}
         <View style={styles.sectionContainer}>
@@ -97,7 +164,7 @@ export default function ProfileScreen() {
               subtitle="שם, תאריך לידה, משקל"
               iconColor="#FF9F1C" 
               iconBg="#FFF3E0"
-              onPress={() => {}}
+              onPress={() => {Alert.alert('בקרוב', 'מסך פרטי בייבי')}}
             />
             <View style={[styles.separator, { backgroundColor: theme.border }]} />
             <SettingRow 
@@ -122,6 +189,7 @@ export default function ProfileScreen() {
               onToggle={setNotificationsEnabled}
               iconColor="#6366F1"
               iconBg="#EEF2FF"
+              hasSwitch
             />
             <View style={[styles.separator, { backgroundColor: theme.border }]} />
             <SettingRow 
@@ -131,48 +199,60 @@ export default function ProfileScreen() {
               onToggle={setSoundEnabled}
               iconColor="#F472B6"
               iconBg="#FCE7F3"
+              hasSwitch
             />
             <View style={[styles.separator, { backgroundColor: theme.border }]} />
             <SettingRow 
-              icon="moon-outline" 
-              title="מצב לילה" 
+              icon="color-palette-outline" 
+              title="מצב לילה (Dark Mode)" 
               value={darkModeEnabled}
               onToggle={setDarkModeEnabled}
               iconColor="#64748B"
               iconBg="#F1F5F9"
+              hasSwitch
             />
           </View>
         </View>
 
-        {/* קבוצה 3: מידע וכללי */}
-        <View style={styles.sectionContainer}>
-          <SectionHeader title="אזור אישי" />
-          <View style={[styles.sectionContent, { backgroundColor: theme.card }, Shadows.small]}>
-            <SettingRow 
-              icon="document-text-outline" 
-              title="ייצוא נתונים" 
-              onPress={() => {}}
-              iconColor={theme.textMuted}
-              iconBg={theme.background}
-            />
-            <View style={[styles.separator, { backgroundColor: theme.border }]} />
-            <SettingRow 
-              icon="help-buoy-outline" 
-              title="תמיכה ועזרה" 
-              onPress={() => {}}
-              iconColor={theme.textMuted}
-              iconBg={theme.background}
-            />
-            <View style={[styles.separator, { backgroundColor: theme.border }]} />
-            <SettingRow 
-              icon="log-out-outline" 
-              title="התנתקות" 
-              isDestructive
-              onPress={() => Alert.alert('התנתקות', 'בטוח שרוצים לצאת?', [{text: 'ביטול'}, {text: 'התנתק', style: 'destructive'}])}
-              iconBg="#FEF2F2"
-            />
+        {/* קבוצה 3: אזור אישי ו-Auth (מוצג רק אם מחובר) */}
+        {authState === 'LOGGED_IN' && (
+          <View style={styles.sectionContainer}>
+            <SectionHeader title="אזור אישי" />
+            <View style={[styles.sectionContent, { backgroundColor: theme.card }, Shadows.small]}>
+              <SettingRow 
+                icon="cloud-upload-outline" 
+                title="ייצוא וגיבוי נתונים" 
+                onPress={() => Alert.alert('בקרוב', 'ייצוא נתונים ל-CSV/JSON')}
+                iconColor={theme.textMuted}
+                iconBg={theme.background}
+              />
+              <View style={[styles.separator, { backgroundColor: theme.border }]} />
+              <SettingRow 
+                icon="log-out-outline" 
+                title="התנתקות" 
+                isDestructive
+                onPress={() => handleAuth('logout')}
+                iconBg="#FEF2F2"
+              />
+            </View>
           </View>
-        </View>
+        )}
+        
+        {/* קבוצה 4: יציאה וכניסה (אם מנותק) */}
+        {authState === 'LOGGED_OUT' && (
+             <View style={styles.sectionContainer}>
+                <SectionHeader title="אפשרויות נוספות" />
+                <View style={[styles.sectionContent, { backgroundColor: theme.card }, Shadows.small]}>
+                     <SettingRow 
+                        icon="lock-closed-outline" 
+                        title="שכחתי סיסמה" 
+                        onPress={() => Alert.alert('שכחתי סיסמה', 'בקרוב קישור לעמוד איפוס')}
+                        iconColor={theme.error}
+                        iconBg="#FEF2F2"
+                    />
+                </View>
+            </View>
+        )}
 
         <View style={styles.footer}>
           <Text style={[styles.versionText, { color: theme.textLight }]}>ParentApp v1.0.0 (Beta)</Text>
@@ -197,12 +277,36 @@ const styles = StyleSheet.create({
     textAlign: 'left',
   },
 
-  // Profile Card
+  // Profile/Auth Card
   profileCard: {
     padding: 20,
     borderRadius: 20,
     marginBottom: 30,
   },
+  loginHeader: { fontSize: 22, fontWeight: '700', marginBottom: 5, textAlign: 'left' },
+  loginSubheader: { fontSize: 14, marginBottom: 20, textAlign: 'left' },
+  
+  authButton: {
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  authButtonSocial: {
+    flexDirection: 'row-reverse',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  socialIcon: {
+      position: 'absolute',
+      right: 15,
+  },
+  authButtonText: { color: '#FFF', fontSize: 16, fontWeight: '600' },
+  
+  // Profile View
   profileHeader: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
